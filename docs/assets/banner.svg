@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Susurro — Dos PCs. Un mensaje. Cero distracciones.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#11141a"/>
+      <stop offset="1" stop-color="#1e2531"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.18" r="0.6">
+      <stop offset="0" stop-color="#8aa9d6" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#8aa9d6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.12" cy="0.95" r="0.5">
+      <stop offset="0" stop-color="#e0a458" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#e0a458" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="400" rx="18" fill="url(#bg)"/>
+  <rect width="1280" height="400" rx="18" fill="url(#glow)"/>
+  <rect width="1280" height="400" rx="18" fill="url(#glow2)"/>
+
+  <!-- Marca -->
+  <g transform="translate(470 78)">
+    <rect x="0" y="0" width="84" height="84" rx="20" fill="#1c1d21" stroke="#3a3d44" stroke-width="2"/>
+    <rect x="16" y="44" width="52" height="9" rx="4.5" fill="#e7e8ea"/>
+    <rect x="25" y="58" width="34" height="9" rx="4.5" fill="#8aa9d6"/>
+  </g>
+  <text x="578" y="140" fill="#e7e8ea" font-family="Segoe UI Variable Display, Segoe UI, Inter, -apple-system, Helvetica Neue, Arial, sans-serif"
+        font-size="64" font-weight="600" letter-spacing="-1">Susurro</text>
+
+  <text x="640" y="206" text-anchor="middle" fill="#9a9da4"
+        font-family="Segoe UI Variable Text, Segoe UI, Inter, -apple-system, Helvetica Neue, Arial, sans-serif" font-size="24">
+    Dos PCs. Un mensaje. Cero distracciones.
+  </text>
+
+  <!-- Subtítulo de ejemplo -->
+  <g filter="url(#soft)">
+    <rect x="400" y="262" width="480" height="86" rx="14" fill="#111215" fill-opacity="0.92" stroke="#ffffff" stroke-opacity="0.12"/>
+  </g>
+  <text x="640" y="294" text-anchor="middle" fill="#a4a8b0"
+        font-family="Segoe UI Variable Display, Segoe UI, Inter, -apple-system, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" letter-spacing="1.5">TINTO</text>
+  <text x="640" y="330" text-anchor="middle" fill="#f4f5f6"
+        font-family="Segoe UI Variable Display, Segoe UI, Inter, -apple-system, Helvetica Neue, Arial, sans-serif" font-size="26">Traé los papeles cuando puedas</text>
+</svg>

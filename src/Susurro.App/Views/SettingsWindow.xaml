@@ -1,0 +1,239 @@
+<Window x:Class="Susurro.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Susurro — Configuración"
+        Style="{StaticResource SusurroWindow}"
+        Icon="/Assets/Susurro.ico"
+        Width="470" Height="600"
+        WindowStartupLocation="CenterScreen">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="Row" TargetType="Grid">
+            <Setter Property="Margin" Value="0,5" />
+        </Style>
+        <Style x:Key="ValueLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Barra de título -->
+        <Grid DockPanel.Dock="Top" Height="40">
+            <TextBlock Text="Configuración" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Margin="18,0,0,0" />
+            <Button Style="{StaticResource ChromeCloseButton}" Content="&#xE8BB;" HorizontalAlignment="Right" Height="40" Width="44"
+                    WindowChrome.IsHitTestVisibleInChrome="True" Click="Cancel_Click" ToolTip="Cerrar sin guardar" />
+        </Grid>
+
+        <!-- Botones inferiores -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="18,10">
+            <Grid>
+                <TextBlock x:Name="SaveHint" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancelar" Click="Cancel_Click" IsCancel="True" MinWidth="88" />
+                    <Button Content="Guardar" Style="{StaticResource PrimaryButton}" Click="Save_Click" IsDefault="True" MinWidth="88" Margin="8,0,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl x:Name="Tabs">
+            <!-- ================================================= General -->
+            <TabItem Header="General">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,6,18,16">
+                    <StackPanel>
+                        <TextBlock Text="ESTA PC" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Text="Nombre de esta PC" Margin="0,0,0,6" />
+                        <TextBox x:Name="NameBox" MaxLength="32" Tag="Por ejemplo: Tinto, Oficina" />
+                        <TextBlock x:Name="MachineInfo" Style="{StaticResource Caption}" Margin="0,6,0,0" />
+
+                        <TextBlock Text="INICIO" Style="{StaticResource SectionHeader}" />
+                        <CheckBox x:Name="AutoStartBox" Content="Iniciar con Windows" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,6"
+                                   Text="Al encender la PC, Susurro arranca oculto en la bandeja y se conecta solo con la otra PC." />
+                        <CheckBox x:Name="StartMinBox" Content="Iniciar minimizado en la bandeja" />
+                        <CheckBox x:Name="TrayBox" Content="Mostrar icono en la bandeja del sistema" />
+
+                        <TextBlock Text="MENSAJES" Style="{StaticResource SectionHeader}" />
+                        <CheckBox x:Name="ConfirmBox" Content="Confirmar recepción (Entregado / Visto)" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                                   Text="Al enviar, muestra cuándo la otra PC recibió el mensaje y cuándo lo mostró en pantalla. No se guarda ningún historial de mensajes." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================================================= Overlay (ubicación y tiempo) -->
+            <TabItem Header="Overlay">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,6,18,16">
+                    <StackPanel>
+                        <TextBlock Text="UBICACIÓN" Style="{StaticResource SectionHeader}" />
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Monitor" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="MonitorCombo" Grid.Column="1" />
+                        </Grid>
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Posición" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="PositionCombo" Grid.Column="1" />
+                        </Grid>
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /><ColumnDefinition Width="48" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Distancia al borde" Style="{StaticResource FieldLabel}" />
+                            <Slider x:Name="MarginSlider" Grid.Column="1" Minimum="0" Maximum="30" TickFrequency="1" ValueChanged="Slider_ValueChanged" />
+                            <TextBlock x:Name="MarginValue" Grid.Column="2" Style="{StaticResource ValueLabel}" />
+                        </Grid>
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /><ColumnDefinition Width="48" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Ancho máximo" Style="{StaticResource FieldLabel}" />
+                            <Slider x:Name="WidthSlider" Grid.Column="1" Minimum="30" Maximum="90" TickFrequency="5" ValueChanged="Slider_ValueChanged" />
+                            <TextBlock x:Name="WidthValue" Grid.Column="2" Style="{StaticResource ValueLabel}" />
+                        </Grid>
+
+                        <TextBlock Text="TIEMPO" Style="{StaticResource SectionHeader}" />
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Duración" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="DurationCombo" Grid.Column="1" />
+                        </Grid>
+                        <CheckBox x:Name="AnimBox" Content="Animaciones de entrada y salida" Margin="0,8,0,5" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                                   Text="Si Windows tiene desactivadas las animaciones, Susurro lo respeta automáticamente." />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button Content="Probar" Click="TestNormal_Click" MinWidth="88" ToolTip="Muestra un mensaje de prueba con esta configuración (sin guardar)" />
+                            <Button Content="Probar urgente" Click="TestUrgent_Click" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================================================= Apariencia -->
+            <TabItem Header="Apariencia">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,10,18,16">
+                    <StackPanel>
+                        <!-- Vista previa sobre una "escena" clara y oscura para juzgar la legibilidad -->
+                        <Border CornerRadius="6" Height="118" ClipToBounds="True" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#FF5B6B78" Offset="0" />
+                                    <GradientStop Color="#FF9A968A" Offset="0.45" />
+                                    <GradientStop Color="#FF2B2F36" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Grid>
+                                <TextBlock Text="VISTA PREVIA" FontSize="10" Foreground="#AAFFFFFF" Margin="10,8,0,0" />
+                                <Viewbox StretchDirection="DownOnly" Margin="12,22,12,10" VerticalAlignment="Center">
+                                    <ContentControl x:Name="PreviewHost" Focusable="False" IsTabStop="False" />
+                                </Viewbox>
+                            </Grid>
+                        </Border>
+
+                        <TextBlock Text="TEXTO" Style="{StaticResource SectionHeader}" />
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Color del texto" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="ColorCombo" Grid.Column="1" SelectionChanged="Appearance_Changed" />
+                        </Grid>
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /><ColumnDefinition Width="48" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Tamaño del texto" Style="{StaticResource FieldLabel}" />
+                            <Slider x:Name="FontSlider" Grid.Column="1" Minimum="14" Maximum="44" TickFrequency="1" ValueChanged="Slider_ValueChanged" />
+                            <TextBlock x:Name="FontValue" Grid.Column="2" Style="{StaticResource ValueLabel}" />
+                        </Grid>
+                        <CheckBox x:Name="OutlineBox" Content="Contorno oscuro alrededor de las letras" Margin="0,8,0,5" Checked="Appearance_Changed" Unchecked="Appearance_Changed" />
+                        <CheckBox x:Name="SenderBox" Content="Mostrar el nombre de quien envía" Checked="Appearance_Changed" Unchecked="Appearance_Changed" />
+
+                        <TextBlock Text="FONDO" Style="{StaticResource SectionHeader}" />
+                        <CheckBox x:Name="BackgroundBox" Content="Recuadro de fondo detrás del texto" Checked="Background_Changed" Unchecked="Background_Changed" />
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /><ColumnDefinition Width="48" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Opacidad del fondo" Style="{StaticResource FieldLabel}" />
+                            <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="30" Maximum="100" TickFrequency="5" ValueChanged="Slider_ValueChanged" />
+                            <TextBlock x:Name="OpacityValue" Grid.Column="2" Style="{StaticResource ValueLabel}" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                                   Text="Sin recuadro, el texto flota como un subtítulo de película; conviene dejar activado el contorno para que se lea sobre fondos claros." />
+
+                        <TextBlock Text="URGENTES Y ACCESIBILIDAD" Style="{StaticResource SectionHeader}" />
+                        <Grid Style="{StaticResource Row}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Mensajes urgentes" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="UrgentCombo" Grid.Column="1" SelectionChanged="Appearance_Changed" />
+                        </Grid>
+                        <CheckBox x:Name="ContrastBox" Content="Alto contraste" Margin="0,8,0,5" Checked="Appearance_Changed" Unchecked="Appearance_Changed" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button Content="Probar en pantalla" Click="TestNormal_Click" />
+                            <Button Content="Probar urgente" Click="TestUrgent_Click" Margin="8,0,0,0" />
+                            <Button x:Name="PreviewUrgentButton" Content="Ver urgente en la vista previa" Style="{StaticResource LinkButton}" Margin="14,0,0,0" FontSize="12" Click="PreviewUrgent_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================================================= Conexión -->
+            <TabItem Header="Conexión">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,6,18,16">
+                    <StackPanel>
+                        <TextBlock Text="PC VINCULADA" Style="{StaticResource SectionHeader}" />
+                        <TextBlock x:Name="PeerName" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock x:Name="PeerInfo" Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock x:Name="ConnDot" Text="○" Width="14" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ConnText" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock x:Name="ConnDetail" Style="{StaticResource Caption}" Margin="14,3,0,0" />
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button x:Name="ReconnectButton" Content="Reconectar ahora" Click="Reconnect_Click" Margin="0,0,8,6" />
+                            <Button Content="Volver a vincular…" Click="Repair_Click" Margin="0,0,8,6" />
+                            <Button x:Name="UnpairButton" Content="Desvincular" Click="Unpair_Click" Margin="0,0,8,6" />
+                        </WrapPanel>
+
+                        <TextBlock Text="DIRECCIÓN DE LA OTRA PC" Style="{StaticResource SectionHeader}" />
+                        <TextBox x:Name="ManualBox" Tag="Automática (descubrimiento en la red)" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                   Text="Opcional. IP, IP:puerto o nombre del equipo. Solo hace falta si el descubrimiento automático no funciona en tu red." />
+
+                        <TextBlock Text="ESTA PC" Style="{StaticResource SectionHeader}" />
+                        <TextBlock x:Name="LocalInfo" Style="{StaticResource Caption}" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition Width="110" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Puerto TCP" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="PortBox" Grid.Column="1" MaxLength="5" PreviewTextInput="Digits_PreviewTextInput" />
+                            <TextBlock x:Name="PortHint" Grid.Column="2" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                   Text="Cada PC puede usar su propio puerto; la otra lo aprende al conectarse. Al cambiarlo se reinicia la conexión y puede requerir una regla de firewall nueva." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================================================= Prueba -->
+            <TabItem Header="Prueba">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,6,18,16">
+                    <StackPanel>
+                        <TextBlock Text="OVERLAY" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
+                                   Text="Muestra un mensaje solo en esta PC, con la configuración actual de la pestaña Overlay (aunque todavía no esté guardada)." />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Mostrar mensaje de prueba" Style="{StaticResource PrimaryButton}" Click="TestNormal_Click" />
+                            <Button Content="Probar urgente" Click="TestUrgent_Click" Margin="8,0,0,0" />
+                        </StackPanel>
+
+                        <TextBlock Text="DIAGNÓSTICO" Style="{StaticResource SectionHeader}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Ver registro" Click="ViewLog_Click" />
+                            <Button Content="Abrir carpeta de datos" Click="OpenFolder_Click" Margin="8,0,0,0" />
+                        </StackPanel>
+                        <TextBlock x:Name="AboutText" Style="{StaticResource Caption}" Margin="0,16,0,0" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

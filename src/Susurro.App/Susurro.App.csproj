@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Susurro</AssemblyName>
+    <RootNamespace>Susurro.App</RootNamespace>
+    <ApplicationIcon>Assets\Susurro.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyTitle>Susurro</AssemblyTitle>
+    <Description>Mensajes breves entre dos PCs de la LAN, mostrados como subtítulo discreto.</Description>
+
+    <!-- Bajo consumo: GC de estación de trabajo sin hilo concurrente en segundo plano. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredCompilation>true</TieredCompilation>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <!-- Publicación: ver Properties/PublishProfiles/win-x64.pubxml y README. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Susurro.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Susurro.Core\Susurro.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,7 @@
+* text=auto
+*.cs text diff=csharp
+*.xaml text
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+*.png binary
+*.ico binary
