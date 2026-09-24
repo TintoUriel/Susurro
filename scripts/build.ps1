@@ -3,7 +3,7 @@
   Compila, prueba, publica y (si Inno Setup está instalado) genera SusurroSetup.exe.
 
 .EXAMPLE
-  .\scripts\build.ps1                 # tests + publicación + instalador + zip portátil
+  .\scripts\build.ps1                 # tests + publicación (Susurro.exe único) + instalador
   .\scripts\build.ps1 -SkipTests
   .\scripts\build.ps1 -Version 1.0.1
 #>
@@ -27,10 +27,11 @@ if (Test-Path $publish) { Remove-Item -Recurse -Force $publish }
 dotnet publish src/Susurro.App -c Release -p:PublishProfile=win-x64 -p:Version=$Version -nologo
 if ($LASTEXITCODE -ne 0) { throw "La publicación falló" }
 
-Write-Host "== Zip portátil" -ForegroundColor Cyan
-$zip = Join-Path $root "artifacts\Susurro-$Version-win-x64.zip"
-if (Test-Path $zip) { Remove-Item $zip }
-Compress-Archive -Path "$publish\*", (Join-Path $root "scripts\install-portable.ps1") -DestinationPath $zip
+Write-Host "== Ejecutable único" -ForegroundColor Cyan
+$release = Join-Path $root "artifacts\release"
+New-Item -ItemType Directory -Force $release | Out-Null
+Copy-Item (Join-Path $publish "Susurro.exe") (Join-Path $release "Susurro.exe") -Force
+Write-Host "artifacts\release\Susurro.exe"
 
 Write-Host "== Instalador" -ForegroundColor Cyan
 $iscc = @(
@@ -45,6 +46,6 @@ if ($iscc) {
 } else {
     Write-Host "Inno Setup 6 no está instalado: se omite SusurroSetup.exe." -ForegroundColor Yellow
     Write-Host "Instalalo desde https://jrsoftware.org/isdl.php (o 'winget install JRSoftware.InnoSetup') y volvé a ejecutar este script."
-    Write-Host "Mientras tanto podés usar el zip portátil con scripts\install-portable.ps1."
+    Write-Host "Mientras tanto podés distribuir artifacts\release\Susurro.exe directamente."
 }
 Write-Host "Listo." -ForegroundColor Green

@@ -14,6 +14,8 @@
 **Mensajes breves entre dos PCs de la oficina, que aparecen como un subtítulo discreto.**<br>
 Sin servidor · sin nube · sin cuentas · sin sonidos · sin robar el foco
 
+<a href="https://github.com/TintoUriel/Susurro/releases/latest"><img src="https://img.shields.io/badge/Descargar-Susurro.exe-8aa9d6?style=for-the-badge&logo=windows&logoColor=101216&labelColor=e7e8ea" alt="Descargar Susurro.exe"></a>
+
 [Características](#características) · [Capturas](#capturas) · [Inicio rápido](#inicio-rápido) · [Documentación](#índice)
 
 </div>
@@ -93,7 +95,7 @@ Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+
 
 ### Inicio rápido
 
-1. Instalá Susurro en **las dos PCs** (`SusurroSetup.exe`).
+1. Descargá [**Susurro.exe**](https://github.com/TintoUriel/Susurro/releases/latest) y abrilo en **las dos PCs**.
 2. En una PC: **Mostrar código**. En la otra: **Ingresar código**.
 3. Listo. Desde ahora se conectan solas cada vez que se encienden.
 
@@ -188,8 +190,11 @@ Publicación final **autocontenida** (no requiere instalar .NET en las PCs):
 dotnet publish src/Susurro.App -c Release -p:PublishProfile=win-x64
 ```
 
-Resultado en `artifacts/publish/win-x64/`: `Susurro.exe` + 5 DLL nativas de WPF (~140 MB, el
-runtime de .NET incluido). Esa carpeta se puede copiar tal cual a otra PC.
+Resultado: **un único** `artifacts/publish/win-x64/Susurro.exe` (~140 MB, con el runtime de .NET
+incluido). Se puede copiar tal cual a otra PC y ejecutar.
+
+> ¿Por qué sin comprimir? Comprimido pesaría ~64 MB, pero medido en reposo usa el doble de memoria
+> privada (110 MB contra 53 MB), porque descomprime los ensamblados en memoria. Se prioriza el consumo.
 
 Todo en un paso (tests + publicación + zip portátil + instalador si está Inno Setup):
 
@@ -203,6 +208,15 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 ## 5. Cómo instalar
 
+**La forma más simple — un solo `.exe`**: descargá `Susurro.exe` desde
+[Releases](https://github.com/TintoUriel/Susurro/releases/latest), guardalo en una carpeta fija
+(por ejemplo `C:\Programas\Susurro\`) y abrilo. No necesita instalar nada más: la primera vez
+pide el nombre de la PC y la vinculación, y queda configurado para iniciar con Windows.
+
+> Windows puede mostrar *"Windows protegió tu PC"* porque el ejecutable no está firmado
+> digitalmente: **Más información → Ejecutar de todas formas**. Y la primera vez, el aviso del
+> Firewall: **Permitir** (ver [sección 7](#7-firewall-de-windows)).
+
 **Opción A — instalador** (`artifacts/installer/SusurroSetup.exe`, generado por `scripts/build.ps1`
 si tenés [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 
@@ -211,7 +225,7 @@ si tenés [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 - Se desinstala desde *Configuración de Windows → Aplicaciones*; quita la regla de firewall, el
   inicio automático y, si lo confirmás, la configuración.
 
-**Opción B — sin instalador** (zip `artifacts/Susurro-<versión>-win-x64.zip`): descomprimir y ejecutar
+**Opción B — script de instalación** (junto a `Susurro.exe`, desde `scripts/`): ejecutar
 
 ```bash
 powershell -ExecutionPolicy Bypass -File install-portable.ps1 -AutoStart -Firewall
