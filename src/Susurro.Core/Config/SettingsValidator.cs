@@ -31,6 +31,10 @@ public static class SettingsValidator
 
         s.Overlay = NormalizeOverlay(s.Overlay);
 
+        // null (archivo viejo o editado) → atajo por defecto; "" → desactivado a propósito.
+        s.SendHotkey = s.SendHotkey == null ? AppSettings.DefaultHotkey : s.SendHotkey.Trim();
+        if (s.SendHotkey.Length > 48) s.SendHotkey = AppSettings.DefaultHotkey;
+
         if (s.Peer != null)
         {
             var p = s.Peer;

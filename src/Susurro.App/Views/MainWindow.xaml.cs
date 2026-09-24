@@ -37,6 +37,9 @@ public partial class MainWindow : Window
 
         Loaded += (_, _) => PlaceWindow();
         Activated += (_, _) => FocusInput();
+        Deactivated += (_, _) => _app.OnMainDeactivated();
+        _app.HotkeyChanged += UpdateHotkeyHint;
+        UpdateHotkeyHint();
         Closing += OnClosing;
         UpdateCloseTooltip();
     }
@@ -49,6 +52,11 @@ public partial class MainWindow : Window
             Keyboard.Focus(Input);
         });
     }
+
+    private void UpdateHotkeyHint() =>
+        Input.ToolTip = _app.HotkeyActive && _app.Hotkey != null
+            ? $"Desde cualquier programa: {_app.Hotkey.Display()}"
+            : null;
 
     private void UpdateCloseTooltip() =>
         CloseButton.ToolTip = _app.HasTray ? "Cerrar (Susurro sigue en la bandeja)" : "Salir de Susurro";
@@ -165,6 +173,7 @@ public partial class MainWindow : Window
         UrgentToggle.IsChecked = false;
         if (_app.Link.State.Status == LinkStatus.Connected) ShowFeedback("Enviando…", "MutedBrush", sticky: true);
         FocusInput();
+        _app.AfterSend();
     }
 
     private void Send_Click(object sender, RoutedEventArgs e) => Send();

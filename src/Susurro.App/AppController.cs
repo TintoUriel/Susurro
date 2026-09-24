@@ -31,6 +31,9 @@ internal sealed class AppController : IDisposable
     private SettingsStore _store = null!;
     private OverlayController _overlay = null!;
     private TrayIcon? _tray;
+    private GlobalHotkey? _hotkey;
+    private IntPtr _quickReturnTo;
+    private bool _quickMode;
     private MainWindow _main = null!;
     private SettingsWindow? _settingsWindow;
     private PairingWindow? _pairingWindow;
@@ -66,6 +69,12 @@ internal sealed class AppController : IDisposable
     public event Action<string, DeliveryState>? DeliveryChanged;
     public event Action? PeerChanged;
     public event Action? InvitationClosed;
+    public event Action? HotkeyChanged;
+
+    /// <summary>Atajo global configurado (null = desactivado o inválido).</summary>
+    public HotkeyGesture? Hotkey => _hotkey?.Current;
+    /// <summary>true si el atajo está registrado y funcionando.</summary>
+    public bool HotkeyActive => _hotkey?.IsActive == true;
 
     // ------------------------------------------------------------------ arranque
 
@@ -92,6 +101,15 @@ internal sealed class AppController : IDisposable
         Link = CreateLink();
         if (Settings.ShowTrayIcon) CreateTray();
         _main = new MainWindow(this);
+        try
+        {
+            _hotkey = new GlobalHotkey(OnHotkey);
+            ApplyHotkey(Settings.SendHotkey);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("hotkey", "No se pudo inicializar el atajo global", ex);
+        }
 
         AutoStart.Repair(Settings.StartWithWindows, Args.Profile);
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
@@ -205,6 +223,7 @@ internal sealed class AppController : IDisposable
 
         if (updated.FriendlyName != old.FriendlyName) Link.UpdateLocalName(updated.FriendlyName);
         if (updated.StartWithWindows != old.StartWithWindows) AutoStart.Set(updated.StartWithWindows, Args.Profile);
+        if (updated.SendHotkey != old.SendHotkey) ApplyHotkey(updated.SendHotkey);
         _overlay.UpdateSettings(updated.Overlay);
         if (updated.Peer != null && updated.Peer.ManualAddress != old.Peer?.ManualAddress)
             Link.UpdateManualAddress(updated.Peer.ManualAddress);
@@ -267,14 +286,79 @@ internal sealed class AppController : IDisposable
 
     public void HideMain()
     {
+        // Si se abrió con el atajo, se devuelve el foco a la ventana en la que el usuario estaba.
+        var returnTo = _quickMode ? _quickReturnTo : IntPtr.Zero;
+        _quickMode = false;
+        _quickReturnTo = IntPtr.Zero;
         if (_tray == null)
         {
             _main.WindowState = WindowState.Minimized;
+        }
+        else
+        {
+            RememberMainPosition();
+            _main.Hide();
+            RequestTrim();
+        }
+        if (returnTo != IntPtr.Zero) Native.NativeMethods.SetForegroundWindow(returnTo);
+    }
+
+    // ------------------------------------------------------------------ atajo global
+
+    private void ApplyHotkey(string? text)
+    {
+        if (_hotkey == null) return;
+        HotkeyGesture.TryParse(text, out var gesture);
+        if (!string.IsNullOrWhiteSpace(text) && gesture == null)
+            Log.Warn("hotkey", $"Atajo inválido en la configuración: «{text}»");
+        var ok = _hotkey.Set(gesture);
+        if (gesture != null && ok) Log.Info("hotkey", "Atajo global: " + gesture.Display());
+        HotkeyChanged?.Invoke();
+    }
+
+    /// <summary>¿Se puede usar esta combinación? (no la usa Windows ni otro programa)</summary>
+    public bool CanUseHotkey(HotkeyGesture gesture) => _hotkey?.CanRegister(gesture) ?? false;
+
+    /// <summary>Mientras se elige un atajo nuevo, el actual no debe interceptar las teclas.</summary>
+    public void SuspendHotkey() => _hotkey?.Suspend();
+
+    public void ResumeHotkey() => _hotkey?.Resume();
+
+    private void OnHotkey()
+    {
+        if (_exiting) return;
+        // Segunda pulsación con la ventana rápida abierta: cerrarla y volver.
+        if (_quickMode && _main.IsVisible && _main.IsActive)
+        {
+            HideMain();
             return;
         }
-        RememberMainPosition();
-        _main.Hide();
-        RequestTrim();
+        var fg = Native.NativeMethods.GetForegroundWindow();
+        var ownHandle = new System.Windows.Interop.WindowInteropHelper(_main).Handle;
+        _quickReturnTo = fg != ownHandle ? fg : IntPtr.Zero;
+        _quickMode = _quickReturnTo != IntPtr.Zero;
+        ShowMain();
+    }
+
+    /// <summary>Tras enviar: si se abrió con el atajo y hay conexión, se oculta y se vuelve al trabajo.</summary>
+    public void AfterSend()
+    {
+        if (!_quickMode) return;
+        if (Link.State.Status != LinkStatus.Connected) return; // sin conexión: dejar visible el estado "En espera"
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (_quickMode && _main.IsActive) HideMain();
+        };
+        timer.Start();
+    }
+
+    /// <summary>El usuario pasó a otra ventana por su cuenta: ya no hay a dónde "volver".</summary>
+    public void OnMainDeactivated()
+    {
+        _quickMode = false;
+        _quickReturnTo = IntPtr.Zero;
     }
 
     public void ToggleMain()
@@ -407,6 +491,8 @@ internal sealed class AppController : IDisposable
         _trimTimer.Stop();
         _tray?.Dispose();
         _tray = null;
+        _hotkey?.Dispose();
+        _hotkey = null;
         _instance.Dispose();
         Log.Info("app", "Fin");
     }

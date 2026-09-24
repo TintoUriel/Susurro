@@ -19,6 +19,8 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _edit;
     private bool _loading = true;
     private bool _previewUrgent;
+    private string _hotkeyText = "";
+    private bool _hotkeyCapturing;
 
     internal SettingsWindow(AppController app)
     {
@@ -38,6 +40,7 @@ public partial class SettingsWindow : Window
         {
             _app.LinkStateChanged -= ApplyLinkState;
             _app.PeerChanged -= OnPeerChanged;
+            _app.ResumeHotkey(); // por si se cerró mientras se elegía un atajo
         };
     }
 
@@ -102,6 +105,8 @@ public partial class SettingsWindow : Window
         StartMinBox.IsChecked = _edit.StartMinimized;
         TrayBox.IsChecked = _edit.ShowTrayIcon;
         ConfirmBox.IsChecked = _edit.ConfirmDelivery;
+        _hotkeyText = _edit.SendHotkey;
+        ShowHotkey();
 
         var o = _edit.Overlay;
         Select(MonitorCombo, o.Monitor, v => $"{v} (no conectado)");
@@ -207,6 +212,92 @@ public partial class SettingsWindow : Window
         UpdatePreview();
     }
 
+    // ------------------------------------------------------------------ atajo de teclado
+
+    private void ShowHotkey(string? message = null, bool error = false)
+    {
+        HotkeyGesture.TryParse(_hotkeyText, out var g);
+        HotkeyBox.Text = g?.Display() ?? "";
+        string hint;
+        if (message != null) hint = message;
+        else if (_hotkeyCapturing) hint = "Apretá la combinación (por ejemplo Ctrl + Shift + Espacio). Esc cancela.";
+        else if (g == null) hint = "Desactivado.";
+        else if (_hotkeyText == _app.Settings.SendHotkey && !_app.HotkeyActive)
+        {
+            hint = "Ese atajo lo usa Windows u otro programa: elegí otro.";
+            error = true;
+        }
+        else hint = "Abre Susurro con el cursor listo para escribir; Enter envía y te devuelve a lo que estabas haciendo.";
+        HotkeyHint.Text = hint;
+        HotkeyHint.Foreground = (Brush)FindResource(error ? "ErrBrush" : "MutedBrush");
+    }
+
+    private void HotkeyBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        _hotkeyCapturing = true;
+        _app.SuspendHotkey(); // para que la combinación actual llegue a este campo
+        ShowHotkey();
+    }
+
+    private void HotkeyBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        _hotkeyCapturing = false;
+        _app.ResumeHotkey();
+        if (HotkeyHint.Foreground != FindResource("ErrBrush")) ShowHotkey();
+    }
+
+    private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var mods = Keyboard.Modifiers;
+        if (key is Key.ImeProcessed or Key.DeadCharProcessed) return;
+
+        if (mods == ModifierKeys.None && key == Key.Escape)
+        {
+            Tabs.Focus();
+            return;
+        }
+        if (mods == ModifierKeys.None && key is Key.Back or Key.Delete)
+        {
+            _hotkeyText = "";
+            Tabs.Focus();
+            return;
+        }
+        if (HotkeyGesture.IsModifierKey(key))
+        {
+            // Mostrar lo que se va apretando: "Ctrl + Shift + …"
+            var partial = new HotkeyGesture(mods, Key.None).Display();
+            HotkeyBox.Text = partial.Replace("None", "…");
+            return;
+        }
+        if (!HotkeyGesture.IsValid(mods, key))
+        {
+            ShowHotkey("Tiene que incluir Ctrl, Alt, Shift o Windows (por ejemplo Ctrl + Shift + Espacio).", error: true);
+            return;
+        }
+        var gesture = new HotkeyGesture(mods, key);
+        if (!_app.CanUseHotkey(gesture))
+        {
+            ShowHotkey($"{gesture.Display()} ya lo usa Windows u otro programa. Probá otra combinación.", error: true);
+            return;
+        }
+        _hotkeyText = gesture.ToString();
+        Tabs.Focus();
+    }
+
+    private void HotkeyReset_Click(object sender, RoutedEventArgs e)
+    {
+        _hotkeyText = AppSettings.DefaultHotkey;
+        ShowHotkey();
+    }
+
+    private void HotkeyClear_Click(object sender, RoutedEventArgs e)
+    {
+        _hotkeyText = "";
+        ShowHotkey();
+    }
+
     // ------------------------------------------------------------------ apariencia / vista previa
 
     private void Appearance_Changed(object sender, RoutedEventArgs e) => UpdatePreview();
@@ -281,6 +372,7 @@ public partial class SettingsWindow : Window
         _edit.StartMinimized = StartMinBox.IsChecked == true;
         _edit.ShowTrayIcon = TrayBox.IsChecked == true;
         _edit.ConfirmDelivery = ConfirmBox.IsChecked == true;
+        _edit.SendHotkey = _hotkeyText;
         _edit.Overlay = ReadOverlay();
         _edit.Port = port;
         if (_edit.Peer != null) _edit.Peer.ManualAddress = manual.Length > 0 ? manual : null;

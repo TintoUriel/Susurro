@@ -101,6 +101,24 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void Send_hotkey_defaults_and_can_be_disabled()
+    {
+        Assert.Equal("Ctrl+Shift+Space", new AppSettings().SendHotkey);
+
+        // Configuración de una versión anterior (sin el campo) → atajo por defecto.
+        Directory.CreateDirectory(_dir);
+        var store = new SettingsStore(_dir);
+        File.WriteAllText(store.FilePath, "{ \"friendlyName\": \"Tinto\" }");
+        Assert.Equal(AppSettings.DefaultHotkey, store.Load("PC", out _).SendHotkey);
+
+        // Desactivado a propósito ("") se respeta.
+        var s = store.Load("PC", out _);
+        s.SendHotkey = "";
+        store.Save(s);
+        Assert.Equal("", store.Load("PC", out _).SendHotkey);
+    }
+
+    [Fact]
     public void Clone_is_deep()
     {
         var s = new AppSettings { Peer = new PeerSettings { Name = "A" } };

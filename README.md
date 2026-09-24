@@ -9,7 +9,7 @@
 ![WPF](https://img.shields.io/badge/UI-WPF-1c1d21?style=flat-square)
 ![LAN P2P](https://img.shields.io/badge/red-LAN%20P2P-1c1d21?style=flat-square)
 ![Cifrado](https://img.shields.io/badge/cifrado-AES--256--GCM-1c1d21?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-79%20OK-6fbf8e?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-80%20OK-6fbf8e?style=flat-square)
 
 **Mensajes breves entre dos PCs de la oficina, que aparecen como un subtítulo discreto.**<br>
 Sin servidor · sin nube · sin cuentas · sin sonidos · sin robar el foco
@@ -39,7 +39,8 @@ Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+
 
 **Una utilidad pequeña, no una aplicación empresarial.**
 
-- <kbd>Enter</kbd> envía · <kbd>Ctrl</kbd>+<kbd>U</kbd> urgente · <kbd>Esc</kbd> oculta
+- <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde **cualquier programa** abre Susurro listo para escribir
+- <kbd>Enter</kbd> envía y te devuelve a lo que estabas · <kbd>Ctrl</kbd>+<kbd>U</kbd> urgente · <kbd>Esc</kbd> oculta
 - Máximo 300 caracteres; el campo se limpia y conserva el foco
 - `Enviado` → `Entregado ✓` → `Visto ✓`
 - Vive en la bandeja del sistema y arranca con Windows
@@ -53,6 +54,7 @@ Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+
 
 | | |
 |---|---|
+| ⌨️ **Atajo global** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde cualquier programa: escribís, <kbd>Enter</kbd>, y volvés a lo que estabas. Configurable. |
 | 🪶 **Liviano de verdad** | 0 % de CPU en reposo (sin sondeo ni bucles), ~9 MB residentes en la bandeja, configuración de pocos KB. |
 | 🔌 **Directo por la LAN** | Las dos PCs se hablan entre sí por TCP. Sin servidor central, sin internet, sin base de datos. |
 | 🔎 **Se encuentran solas** | Descubrimiento automático por UDP; si cambia la IP, se vuelven a encontrar por su identificador. |
@@ -346,6 +348,14 @@ Los perfiles de desarrollo no se agregan al inicio de Windows.
 
 ## Uso
 
+**Atajo global**: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> abre Susurro desde cualquier programa con el
+cursor en el campo de texto. <kbd>Enter</kbd> envía, la ventana se oculta y el foco vuelve a la aplicación
+en la que estabas (si no hay conexión, queda visible mostrando "En espera"). <kbd>Esc</kbd> o volver a
+apretar el atajo cancela. Se cambia o desactiva en *Configuración → General → Atajo de teclado*: hacé
+clic en el campo y apretá la combinación; si Windows u otro programa ya la usa, Susurro avisa
+(por ejemplo, <kbd>Win</kbd>+<kbd>Espacio</kbd> está reservado por Windows para cambiar el idioma del teclado).
+Usa `RegisterHotKey`: no hay ganchos de teclado ni se lee ninguna otra tecla.
+
 **Bandeja del sistema**: clic izquierdo muestra/oculta la ventana; clic derecho abre el menú
 *Mostrar ventana · Ocultar ventana · Configuración · Salir*. El punto del icono indica el estado
 (verde conectado, ámbar conectando, gris desconectado). Cerrar la ventana la oculta en la bandeja.
@@ -385,7 +395,7 @@ Los perfiles de desarrollo no se agregan al inicio de Windows.
 
 | Pestaña | Opciones |
 |---|---|
-| **General** | Nombre de esta PC · Iniciar con Windows · Iniciar minimizado · Icono en la bandeja · Confirmar recepción |
+| **General** | Nombre de esta PC · Iniciar con Windows · Iniciar minimizado · Icono en la bandeja · **Atajo de teclado** · Confirmar recepción |
 | **Overlay** | Monitor · Posición (7 opciones) · Distancia al borde · Ancho máximo · Duración · Animaciones · Probar |
 | **Apariencia** | Vista previa en vivo · **Color del texto** (blanco, amarillo, gris claro) · Tamaño · **Contorno de las letras** · Nombre del remitente · **Recuadro de fondo** (on/off) · Opacidad · Estilo de urgentes · Alto contraste |
 | **Conexión** | PC vinculada · Estado · Reconectar · Volver a vincular · Desvincular · Dirección manual · IP local · Puerto |
@@ -419,7 +429,7 @@ al cerrarse, recorte de memoria solo tras eventos (no periódico), icono de band
 dotnet test tests/Susurro.Core.Tests
 ```
 
-79 tests (xUnit):
+80 tests (xUnit):
 
 - **Protocolo y serialización**: ida y vuelta de paquetes, JSON inválido, campos desconocidos,
   tramas (tamaño máximo, truncadas, EOF), AES-GCM (manipulación, repetición, reordenamiento, otra clave).

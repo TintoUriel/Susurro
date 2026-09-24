@@ -94,6 +94,13 @@ public sealed class AppSettings
     public bool ShowTrayIcon { get; set; } = true;
     /// <summary>Mostrar "Entregado"/"Visto" al enviar (pide confirmación de lectura al receptor).</summary>
     public bool ConfirmDelivery { get; set; } = true;
+    /// <summary>
+    /// Atajo global para abrir Susurro y escribir desde cualquier programa ("Ctrl+Shift+Space").
+    /// Cadena vacía = desactivado.
+    /// </summary>
+    public string SendHotkey { get; set; } = DefaultHotkey;
+    public const string DefaultHotkey = "Ctrl+Shift+Space";
+
     /// <summary>true cuando el usuario ya pasó por la pantalla inicial.</summary>
     public bool SetupCompleted { get; set; }
 
