@@ -59,8 +59,8 @@
                      AutomationProperties.Name="Mensaje" />
 
             <Grid Margin="0,10,0,0">
-                <ToggleButton x:Name="UrgentToggle" Style="{StaticResource ChipToggle}" Content="Urgente" HorizontalAlignment="Left"
-                              ToolTip="Enviar como urgente (Ctrl+U)" FontSize="12" />
+                <ToggleButton x:Name="UrgentToggle" Style="{StaticResource ChipToggle}" Content="Importante" HorizontalAlignment="Left"
+                              ToolTip="Mensaje importante: queda en pantalla hasta que la otra persona le haga clic (Ctrl+I)" FontSize="12" />
                 <TextBlock x:Name="Counter" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"
                            Foreground="{StaticResource FaintBrush}" Visibility="Collapsed" />
                 <Button x:Name="SendButton" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Right" MinWidth="96" Click="Send_Click"

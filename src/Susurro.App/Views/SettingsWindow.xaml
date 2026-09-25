@@ -124,7 +124,7 @@
 
                         <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                             <Button Content="Probar" Click="TestNormal_Click" MinWidth="88" ToolTip="Muestra un mensaje de prueba con esta configuración (sin guardar)" />
-                            <Button Content="Probar urgente" Click="TestUrgent_Click" Margin="8,0,0,0" />
+                            <Button Content="Probar importante" Click="TestUrgent_Click" Margin="8,0,0,0" />
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
@@ -177,18 +177,18 @@
                         <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
                                    Text="Sin recuadro, el texto flota como un subtítulo de película; conviene dejar activado el contorno para que se lea sobre fondos claros." />
 
-                        <TextBlock Text="URGENTES Y ACCESIBILIDAD" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Text="IMPORTANTES Y ACCESIBILIDAD" Style="{StaticResource SectionHeader}" />
                         <Grid Style="{StaticResource Row}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                            <TextBlock Text="Mensajes urgentes" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Text="Mensajes importantes" Style="{StaticResource FieldLabel}" />
                             <ComboBox x:Name="UrgentCombo" Grid.Column="1" SelectionChanged="Appearance_Changed" />
                         </Grid>
                         <CheckBox x:Name="ContrastBox" Content="Alto contraste" Margin="0,8,0,5" Checked="Appearance_Changed" Unchecked="Appearance_Changed" />
 
                         <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                             <Button Content="Probar en pantalla" Click="TestNormal_Click" />
-                            <Button Content="Probar urgente" Click="TestUrgent_Click" Margin="8,0,0,0" />
-                            <Button x:Name="PreviewUrgentButton" Content="Ver urgente en la vista previa" Style="{StaticResource LinkButton}" Margin="14,0,0,0" FontSize="12" Click="PreviewUrgent_Click" />
+                            <Button Content="Probar importante" Click="TestUrgent_Click" Margin="8,0,0,0" />
+                            <Button x:Name="PreviewUrgentButton" Content="Ver importante en la vista previa" Style="{StaticResource LinkButton}" Margin="14,0,0,0" FontSize="12" Click="PreviewUrgent_Click" />
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
@@ -250,7 +250,7 @@
                                    Text="Muestra un mensaje solo en esta PC, con la configuración actual de la pestaña Overlay (aunque todavía no esté guardada)." />
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Mostrar mensaje de prueba" Style="{StaticResource PrimaryButton}" Click="TestNormal_Click" />
-                            <Button Content="Probar urgente" Click="TestUrgent_Click" Margin="8,0,0,0" />
+                            <Button Content="Probar importante" Click="TestUrgent_Click" Margin="8,0,0,0" />
                         </StackPanel>
 
                         <TextBlock Text="DIAGNÓSTICO" Style="{StaticResource SectionHeader}" />

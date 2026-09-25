@@ -61,6 +61,9 @@ Claves del modelo:
 - **Publicación**: single-file autocontenido, **sin compresión** (duplica la RAM) y **sin trimming** (WPF no lo admite).
 - **El overlay nunca toma el foco**: `HwndSource` con `WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED |
   WS_EX_TOOLWINDOW | WS_EX_TOPMOST` y `SW_SHOWNOACTIVATE`. Medido en píxeles físicos con DPI PerMonitorV2.
+  Única excepción al click-through: los mensajes **importantes** (`Urgent` en el protocolo) no llevan
+  `WS_EX_TRANSPARENT` y se cierran con un clic, pero siguen sin activarse (`MA_NOACTIVATE`). No se van
+  solos, y su `ack shown` ("Visto") se envía al hacer clic.
 - **Seguridad**: no confiar en la IP, en el nombre ni en datos de descubrimiento; verificar siempre
   `id == hash(clave)` y la prueba HMAC antes de aceptar a alguien. Validar tamaños de trama **antes** de
   reservar memoria. La clave privada en disco se protege con DPAPI. Cambios de protocolo → subir

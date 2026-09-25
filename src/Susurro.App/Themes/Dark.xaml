@@ -193,7 +193,7 @@
         </Setter>
     </Style>
 
-    <!-- Chip conmutable ("Urgente"). -->
+    <!-- Chip conmutable ("Importante"). -->
     <Style x:Key="ChipToggle" TargetType="ToggleButton">
         <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
         <Setter Property="Height" Value="26" />

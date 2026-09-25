@@ -28,7 +28,8 @@ Sin servidor · sin nube · sin cuentas · sin códigos · sin sonidos · sin ro
 
 Elegís a quién (o a todos los conectados), escribís y, en su PC, el mensaje aparece unos segundos
 **por encima de todo**, como un subtítulo. Quien lo recibe puede seguir escribiendo en Word, en el navegador o en Visual Studio:
-Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+Tab** y los clics lo atraviesan.
+Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+Tab** y los clics lo atraviesan. Los mensajes **importantes** son la excepción: quedan en
+pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés usando).
 
 <table>
   <tr>
@@ -41,7 +42,7 @@ Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+
 
 - <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde **cualquier programa** abre Susurro listo para escribir
 - **Para:** una persona o todos los conectados · <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> cambia mientras escribís
-- <kbd>Enter</kbd> envía y te devuelve a lo que estabas · <kbd>Ctrl</kbd>+<kbd>U</kbd> urgente · <kbd>Esc</kbd> oculta
+- <kbd>Enter</kbd> envía y te devuelve a lo que estabas · <kbd>Ctrl</kbd>+<kbd>I</kbd> importante · <kbd>Esc</kbd> oculta
 - Máximo 300 caracteres; el campo se limpia y conserva el foco
 - `Enviado` → `Entregado ✓` → `Visto ✓`
 - Vive en la bandeja del sistema y arranca con Windows
@@ -64,7 +65,7 @@ Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+
 | 🔁 **Reconexión automática** | PC apagada, reiniciada, suspendida o red caída: se reconecta sola y entrega lo que quedó en espera. |
 | 🔐 **Seguro sin contraseñas** | Cada PC tiene una identidad de clave pública (su id es el hash de la clave): nadie puede hacerse pasar por otra. Autenticación mutua y AES-256-GCM. Podés bloquear a quien quieras. |
 | 🎬 **Overlay tipo subtítulo** | Posición, monitor, duración, tamaño, color (blanco / amarillo / gris), recuadro opcional y contorno de letras. |
-| ⚡ **Urgentes discretos** | Una diferencia visual sutil (borde ámbar, negrita o fondo cálido), nunca sonidos ni ventanas emergentes. |
+| 📌 **Importantes** | Quedan en pantalla hasta que les hacés clic, sin robar el foco; el *Visto* le llega a quien lo mandó recién en ese momento. Sin sonidos ni ventanas emergentes. |
 | 🖥️ **Multimonitor y DPI** | Monitor automático, principal o específico; nítido al 100, 125, 150 y 200 %; el texto nunca se corta. |
 | ♿ **Accesible** | Tamaño de fuente, alto contraste, animaciones desactivables; respeta la configuración de Windows. |
 
@@ -77,8 +78,8 @@ Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+
       <sub><b>Estilo cine</b> — amarillo, sin recuadro y con contorno</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/assets/urgente.png" alt="Mensaje urgente" width="100%"><br>
-      <sub><b>Urgente</b> — distinto, pero igual de discreto</sub>
+      <img src="docs/assets/importante.png" alt="Mensaje importante" width="100%"><br>
+      <sub><b>Importante</b> — queda hasta que le hacés clic</sub>
     </td>
   </tr>
   <tr>
@@ -394,12 +395,17 @@ alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar
 - Ventana Win32 creada con `HwndSource` y estilos `WS_EX_NOACTIVATE | WS_EX_TRANSPARENT |
   WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST`, mostrada con `SW_SHOWNOACTIVATE`:
   - **nunca roba el foco** (seguís escribiendo en Word, el navegador, Visual Studio…);
-  - **los clics lo atraviesan**;
+  - **los clics lo atraviesan** (salvo en los importantes, ver abajo);
   - **no aparece en Alt+Tab ni en la barra de tareas**;
   - no captura teclado ni mouse, no minimiza ni toca la aplicación activa.
 - Un mensaje a la vez. Los que llegan mientras hay uno visible esperan en una cola (máx. 20); los
-  urgentes pasan delante de los normales pendientes, sin interrumpir al actual.
+  importantes pasan delante de los normales pendientes, sin interrumpir al actual.
 - Duración configurable (2, 5, 8 o 10 s) + hasta 4 s extra de lectura para textos largos.
+- **Mensajes importantes** (botón *Importante* o <kbd>Ctrl</kbd>+<kbd>I</kbd> al escribir): no se van
+  solos, quedan en pantalla con la leyenda *Clic para cerrar* hasta que se les hace clic. Esa ventana
+  recibe el clic pero sigue sin activarse (`WS_EX_NOACTIVATE` + `MA_NOACTIVATE`): el foco no se mueve
+  de la aplicación en uso. Con *Confirmar recepción*, quien lo mandó ve *Visto ✓* recién al clic.
+  Mientras un importante espera, los mensajes que llegan quedan en la cola.
 - Animación de entrada (200 ms) y salida (320 ms) muy sutiles; se desactivan si lo pedís o si
   Windows tiene las animaciones apagadas.
 - **Multimonitor**: *Automático* (el monitor de la ventana en uso), *Monitor principal* o un monitor
@@ -415,7 +421,7 @@ alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar
 |---|---|
 | **General** | Tu nombre · Iniciar con Windows · Iniciar minimizado · Icono en la bandeja · **Atajo de teclado** · Confirmar recepción |
 | **Overlay** | Monitor · Posición (7 opciones) · Distancia al borde · Ancho máximo · Duración · Animaciones · Probar |
-| **Apariencia** | Vista previa en vivo · **Color del texto** (blanco, amarillo, gris claro) · Tamaño · **Contorno de las letras** · Nombre del remitente · **Recuadro de fondo** (on/off) · Opacidad · Estilo de urgentes · Alto contraste |
+| **Apariencia** | Vista previa en vivo · **Color del texto** (blanco, amarillo, gris claro) · Tamaño · **Contorno de las letras** · Nombre del remitente · **Recuadro de fondo** (on/off) · Opacidad · Estilo de importantes · Alto contraste |
 | **Personas** | Lista con estado e IP · Buscar de nuevo · Bloquear / Desbloquear · Quitar de la lista · Agregar por dirección · IP local · Puerto |
 | **Prueba** | Mostrar mensaje de prueba (solo en esta PC, con la configuración sin guardar) · Ver registro · Carpeta de datos |
 
@@ -453,7 +459,7 @@ dotnet test tests/Susurro.Core.Tests
   tramas (tamaño máximo, truncadas, EOF), AES-GCM (manipulación, repetición, reordenamiento, otra clave).
 - **Identidad**: id = hash de la clave pública, misma clave de enlace en ambos lados y distinta para
   un tercero, claves inválidas, identidad guardada/ilegible, DPAPI.
-- **Validación y cola**: limpieza de texto, límites, duplicados, orden, urgentes, capacidad.
+- **Validación y cola**: limpieza de texto, límites, duplicados, orden, importantes, capacidad.
 - **Reconexión**: backoff, arbitraje de conexiones duplicadas.
 - **Configuración**: valores por defecto (sin nombre del equipo), persistencia, contactos inválidos
   o repetidos, límite de contactos, migración desde la versión con códigos, archivo corrupto, clon profundo.

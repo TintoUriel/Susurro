@@ -425,7 +425,7 @@ public sealed class PeerLink : IAsyncDisposable
                     if (stillQueued) m.SentOnSession = s.Number;
                 }
                 if (!stillQueued) continue;
-                Log.Info("msg", $"Mensaje enviado a {peer.Contact.Name} [{m.Id[..8]}] ({m.Packet.Text?.Length ?? 0} caracteres{(m.Packet.Urgent == true ? ", urgente" : "")})");
+                Log.Info("msg", $"Mensaje enviado a {peer.Contact.Name} [{m.Id[..8]}] ({m.Packet.Text?.Length ?? 0} caracteres{(m.Packet.Urgent == true ? ", importante" : "")})");
                 DeliveryChanged?.Invoke(m.Id, DeliveryState.Sent);
             }
         }
@@ -539,7 +539,7 @@ public sealed class PeerLink : IAsyncDisposable
         if (sender.Length == 0) sender = session.PeerName;
         else if (sender != session.PeerName) UpdatePeerInfo(session, sender);
         var message = new WhisperMessage(id, text, sender, sentAt, p.Urgent == true, p.Seq ?? 0, p.Receipt == true, SenderId: session.PeerId);
-        Log.Info("msg", $"Mensaje recibido de {sender} [{id[..8]}] ({text.Length} caracteres{(message.Urgent ? ", urgente" : "")})");
+        Log.Info("msg", $"Mensaje recibido de {sender} [{id[..8]}] ({text.Length} caracteres{(message.Urgent ? ", importante" : "")})");
         MessageReceived?.Invoke(message);
     }
 

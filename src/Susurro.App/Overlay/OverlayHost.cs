@@ -16,7 +16,9 @@ namespace Susurro.App.Overlay;
 /// Se implementa con un <see cref="HwndSource"/> (no un Window de WPF) para controlar exactamente
 /// los estilos Win32:
 ///  - WS_EX_NOACTIVATE + SW_SHOWNOACTIVATE: nunca roba el foco del teclado.
-///  - WS_EX_TRANSPARENT + ventana en capas: los clics atraviesan el overlay.
+///  - WS_EX_TRANSPARENT + ventana en capas: los clics atraviesan el overlay. Excepción: los mensajes
+///    importantes reciben el clic (para cerrarlos), pero siguen sin activarse ni tomar el foco
+///    (WS_EX_NOACTIVATE + MA_NOACTIVATE).
 ///  - WS_EX_TOOLWINDOW sin propietario: no aparece en Alt+Tab ni en la barra de tareas.
 ///  - WS_EX_TOPMOST: por encima de las ventanas normales.
 /// Se crea directamente sobre el monitor destino, así WPF adopta el DPI de ese monitor
@@ -29,18 +31,20 @@ internal sealed class OverlayHost : IDisposable
     private readonly Border _card;
     private readonly TranslateTransform _shift = new();
     private readonly bool _animate;
+    private readonly bool _clickToClose;
     private bool _disposed;
 
     public OverlayHost(WhisperMessage message, OverlaySettings settings)
     {
         var monitor = MonitorService.Resolve(settings.Monitor);
         _animate = settings.Animations && SystemParameters.ClientAreaAnimation;
+        _clickToClose = message.Urgent;
 
         var parameters = new HwndSourceParameters("SusurroOverlay")
         {
             WindowStyle = NativeMethods.WS_POPUP,
             ExtendedWindowStyle = NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_TOOLWINDOW |
-                                  NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TRANSPARENT,
+                                  NativeMethods.WS_EX_NOACTIVATE | (_clickToClose ? 0 : NativeMethods.WS_EX_TRANSPARENT),
             UsesPerPixelTransparency = true,
             // Crear la ventana (oculta) dentro del monitor destino para heredar su DPI.
             PositionX = monitor.WorkArea.Left + monitor.WorkArea.Width / 2,
@@ -50,11 +54,17 @@ internal sealed class OverlayHost : IDisposable
         };
         _source = new HwndSource(parameters) { SizeToContent = SizeToContent.Manual };
         _source.AddHook(WndProc);
-        EnsureExStyles(_source.Handle);
+        EnsureExStyles(_source.Handle, _clickToClose);
 
         _card = SubtitleVisual.Build(message, settings);
         _card.RenderTransform = _shift;
-        var root = new Grid { Background = Brushes.Transparent, IsHitTestVisible = false };
+        var root = new Grid { Background = Brushes.Transparent, IsHitTestVisible = _clickToClose };
+        if (_clickToClose)
+        {
+            _card.Cursor = System.Windows.Input.Cursors.Hand;
+            _card.MouseLeftButtonUp += (_, _) => Dismissed?.Invoke();
+            _card.MouseRightButtonUp += (_, _) => Dismissed?.Invoke();
+        }
         root.Children.Add(_card);
         _source.RootVisual = root;
 
@@ -62,6 +72,9 @@ internal sealed class OverlayHost : IDisposable
     }
 
     public IntPtr Handle => _source.Handle;
+
+    /// <summary>Se hizo clic en un mensaje importante (solo esos reciben clics).</summary>
+    public event Action? Dismissed;
 
     public void Show()
     {
@@ -184,22 +197,23 @@ internal sealed class OverlayHost : IDisposable
         NativeMethods.SetWindowPos(_source.Handle, NativeMethods.HWND_TOPMOST, x, y, w, h, NativeMethods.SWP_NOACTIVATE);
     }
 
-    private static void EnsureExStyles(IntPtr hwnd)
+    private static void EnsureExStyles(IntPtr hwnd, bool clickable)
     {
         var ex = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE).ToInt64();
-        ex |= NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE |
-              NativeMethods.WS_EX_TRANSPARENT | NativeMethods.WS_EX_LAYERED;
+        ex |= NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_LAYERED;
+        if (clickable) ex &= ~(long)NativeMethods.WS_EX_TRANSPARENT;
+        else ex |= NativeMethods.WS_EX_TRANSPARENT;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(ex));
     }
 
-    private static IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         switch (msg)
         {
             case NativeMethods.WM_MOUSEACTIVATE:
                 handled = true;
                 return new IntPtr(NativeMethods.MA_NOACTIVATE);
-            case NativeMethods.WM_NCHITTEST:
+            case NativeMethods.WM_NCHITTEST when !_clickToClose:
                 handled = true;
                 return new IntPtr(NativeMethods.HTTRANSPARENT);
         }

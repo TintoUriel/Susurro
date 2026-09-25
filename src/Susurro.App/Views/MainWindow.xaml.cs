@@ -323,7 +323,7 @@ public partial class MainWindow : Window
             e.Handled = true;
             _app.HideMain();
         }
-        else if (e.Key == Key.U && Keyboard.Modifiers == ModifierKeys.Control)
+        else if (e.Key is Key.I or Key.U && Keyboard.Modifiers == ModifierKeys.Control) // Ctrl+I (Ctrl+U por costumbre)
         {
             e.Handled = true;
             UrgentToggle.IsChecked = UrgentToggle.IsChecked != true;

@@ -435,7 +435,7 @@ public partial class SettingsWindow : Window
     private void PreviewUrgent_Click(object sender, RoutedEventArgs e)
     {
         _previewUrgent = !_previewUrgent;
-        PreviewUrgentButton.Content = _previewUrgent ? "Ver mensaje normal en la vista previa" : "Ver urgente en la vista previa";
+        PreviewUrgentButton.Content = _previewUrgent ? "Ver mensaje normal en la vista previa" : "Ver importante en la vista previa";
         UpdatePreview();
     }
 

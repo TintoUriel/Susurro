@@ -80,7 +80,8 @@ profile { name }                       ← cambio de nombre de la persona
 * Cada mensaje va a **una** persona. "Todos los conectados" envía una copia (con su propio
   `msgId`) a cada persona conectada; la ventana resume "Entregado a 3 de 4".
 * **Enviado / Entregado / Visto**: `Sent` al escribir en el socket, `Delivered` al recibir
-  `ack received`, `Shown` al recibir `ack shown` (el overlay lo mostró).
+  `ack received`, `Shown` al recibir `ack shown` (el overlay lo mostró; en un mensaje importante
+  —`urgent: true`— recién cuando la persona le hizo clic para cerrarlo).
 * **Bandeja de salida**: si no hay conexión con esa persona, el mensaje espera hasta **2 minutos**
   (máx. 20 en espera por persona). Al reconectar se envían en orden. Si una sesión cae con mensajes
   sin confirmar, se reenvían en la siguiente.

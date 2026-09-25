@@ -9,7 +9,8 @@ namespace Susurro.App.Overlay;
 
 /// <summary>
 /// Orquesta el overlay: un mensaje a la vez, cola acotada, temporizadores de un solo disparo
-/// (sin bucles ni sondeo). Todo ocurre en el hilo de UI.
+/// (sin bucles ni sondeo). Los mensajes normales se van solos; los importantes quedan hasta que
+/// se les hace clic (mientras tanto, los que llegan esperan en la cola). Todo ocurre en el hilo de UI.
 /// </summary>
 internal sealed class OverlayController
 {
@@ -85,9 +86,12 @@ internal sealed class OverlayController
         }
 
         var settings = _overrides.Remove(next.Id, out var preview) ? preview : _settings;
+        // Los importantes quedan en pantalla hasta que se les hace clic.
+        var clickToClose = next.Urgent;
         try
         {
             _host = new OverlayHost(next, settings);
+            if (clickToClose) _host.Dismissed += OnDismissed;
             _host.Show();
         }
         catch (Exception ex)
@@ -100,13 +104,27 @@ internal sealed class OverlayController
             return;
         }
 
-        try { _onShown(next); }
-        catch (Exception ex) { Log.Error("overlay", "Error notificando mensaje mostrado", ex); }
+        if (clickToClose) return; // "Visto" y cierre, al hacer clic
+
+        NotifyShown(next);
 
         // Duración configurada + un poco de tiempo de lectura para textos largos (máx. +4 s).
         var extra = Math.Clamp((next.Text.Length - 80) / 40.0, 0, 4);
         _hold.Interval = TimeSpan.FromSeconds(settings.DurationSeconds + extra);
         _hold.Start();
+    }
+
+    private void OnDismissed()
+    {
+        if (_hiding || _host == null) return;
+        if (_queue.Current is { } current) NotifyShown(current); // para un importante, "Visto" = le hicieron clic
+        EndCurrent();
+    }
+
+    private void NotifyShown(WhisperMessage message)
+    {
+        try { _onShown(message); }
+        catch (Exception ex) { Log.Error("overlay", "Error notificando mensaje mostrado", ex); }
     }
 
     private void EndCurrent()

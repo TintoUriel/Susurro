@@ -31,7 +31,9 @@ internal static class SubtitleVisual
         var background = s.ShowBackground || hc;
         var alpha = (byte)Math.Round(255 * (hc ? Math.Max(0.95, s.Opacity) : s.Opacity));
 
-        Brush bg = !background ? Brushes.Transparent
+        // Los importantes se cierran con un clic: sin recuadro se usa un fondo casi invisible
+        // (alfa 1) para que toda la tarjeta reciba el clic y no solo las letras.
+        Brush bg = !background ? (urgent ? new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)) : Brushes.Transparent)
             : hc ? new SolidColorBrush(Color.FromArgb(alpha, 0, 0, 0))
             : urgent && s.UrgentStyle == UrgentStyle.Tinted ? new SolidColorBrush(Color.FromArgb(alpha, 38, 27, 16))
             : new SolidColorBrush(Color.FromArgb(alpha, 17, 18, 21));
@@ -51,9 +53,9 @@ internal static class SubtitleVisual
 
         string? label = null;
         if (s.ShowSenderName && !string.IsNullOrWhiteSpace(message.SenderName))
-            label = urgent ? $"{message.SenderName} · urgente" : message.SenderName;
+            label = urgent ? $"{message.SenderName} · importante" : message.SenderName;
         else if (urgent)
-            label = "urgente";
+            label = "importante";
 
         if (label != null)
         {
@@ -83,6 +85,19 @@ internal static class SubtitleVisual
             Tag = "text",
         };
         panel.Children.Add(text);
+
+        if (urgent)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Clic para cerrar",
+                Foreground = new SolidColorBrush(labelColor) { Opacity = 0.85 },
+                FontFamily = Font,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Tag = "hint",
+            });
+        }
 
         if (s.TextOutline && !hc)
         {
@@ -118,6 +133,11 @@ internal static class SubtitleVisual
             {
                 tb.FontSize = Math.Max(10, Math.Round(size * 0.5));
                 tb.Margin = new Thickness(0, 0, 0, Math.Round(size * 0.2));
+            }
+            else if ((string)tb.Tag == "hint")
+            {
+                tb.FontSize = Math.Max(10, Math.Round(size * 0.45));
+                tb.Margin = new Thickness(0, Math.Round(size * 0.3), 0, 0);
             }
             else
             {
