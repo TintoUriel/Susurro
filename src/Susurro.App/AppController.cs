@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
@@ -20,6 +21,7 @@ using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
 using Susurro.Core.Net;
 using Susurro.Core.Transfers;
+using Susurro.Core.Updates;
 
 namespace Susurro.App;
 
@@ -57,6 +59,11 @@ internal sealed class AppController : IDisposable
     private SettingsWindow? _settingsWindow;
     private WelcomeWindow? _welcomeWindow;
     private LogWindow? _logWindow;
+    private ShortcutsWindow? _shortcutsWindow;
+    private Updater? _updater;
+    private readonly DispatcherTimer _updateRestartTimer;
+    private System.Version? _stagedVersion;
+    private bool _restartingForUpdate;
     private bool _exiting;
     private bool _disposed;
 
@@ -68,6 +75,8 @@ internal sealed class AppController : IDisposable
         _trimTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(4) };
         _typingTimer = new DispatcherTimer(DispatcherPriority.Background);
         _typingTimer.Tick += (_, _) => ExpireTyping();
+        _updateRestartTimer = new DispatcherTimer(DispatcherPriority.Background);
+        _updateRestartTimer.Tick += (_, _) => OnUpdateRestartTimer();
         _trimTimer.Tick += (_, _) =>
         {
             _trimTimer.Stop();
@@ -156,6 +165,7 @@ internal sealed class AppController : IDisposable
         }
 
         AutoStart.Repair(Settings.StartWithWindows, Args.Profile);
+        StartUpdater();
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         NetworkChange.NetworkAddressChanged += OnNetworkChanged;
         NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
@@ -251,7 +261,7 @@ internal sealed class AppController : IDisposable
         if (_tray != null) return;
         try
         {
-            _tray = new TrayIcon(ToggleMain, ShowMain, HideMain, ShowSettings, () => _ = ExitAsync(), () => _main?.IsVisible == true && _main.WindowState != WindowState.Minimized);
+            _tray = new TrayIcon(ToggleMain, ShowMain, HideMain, ShowSettings, ShowShortcuts, () => _ = ExitAsync(), () => _main?.IsVisible == true && _main.WindowState != WindowState.Minimized);
             _tray.SetState(Link.State);
         }
         catch (Exception ex)
@@ -461,6 +471,19 @@ internal sealed class AppController : IDisposable
         }
         if (updated.StartWithWindows != old.StartWithWindows) AutoStart.Set(updated.StartWithWindows, Args.Profile);
         if (updated.SendHotkey != old.SendHotkey) ApplyHotkey(updated.SendHotkey);
+        if (updated.AutoUpdate != old.AutoUpdate)
+        {
+            if (updated.AutoUpdate)
+            {
+                _updater?.Start();
+                if (_stagedVersion != null) ScheduleUpdateRestart(TimeSpan.FromMinutes(1));
+            }
+            else
+            {
+                _updater?.Stop();
+                _updateRestartTimer.Stop(); // si ya se descargó, se usa recién en el próximo arranque
+            }
+        }
         _overlay.UpdateSettings(updated.Overlay);
 
         if (updated.ShowTrayIcon && _tray == null) CreateTray();
@@ -648,6 +671,23 @@ internal sealed class AppController : IDisposable
         _logWindow.Activate();
     }
 
+    public void ShowShortcuts()
+    {
+        if (_exiting) return;
+        if (_shortcutsWindow == null)
+        {
+            _shortcutsWindow = new ShortcutsWindow(this);
+            _shortcutsWindow.Closed += (_, _) =>
+            {
+                _shortcutsWindow = null;
+                RequestTrim();
+            };
+            _shortcutsWindow.Show();
+        }
+        if (_shortcutsWindow.WindowState == WindowState.Minimized) _shortcutsWindow.WindowState = WindowState.Normal;
+        _shortcutsWindow.Activate();
+    }
+
     public void OpenDataFolder()
     {
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{DataDirectory}\"") { UseShellExecute = true }); }
@@ -682,12 +722,148 @@ internal sealed class AppController : IDisposable
         {
             Log.Info("app", "Reanudación tras suspensión");
             Link.NotifyNetworkChanged();
+            _updater?.NotifyResumed();
         }
     }
 
     private void OnNetworkChanged(object? sender, EventArgs e) => Link.NotifyNetworkChanged();
 
     private void OnNetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e) => Link.NotifyNetworkChanged();
+
+    // ------------------------------------------------------------------ actualización automática
+
+    /// <summary>Si el reinicio no se puede hacer ahora, se vuelve a mirar en este tiempo (solo con una versión lista).</summary>
+    private static readonly TimeSpan UpdateRestartRetry = TimeSpan.FromMinutes(5);
+    /// <summary>Sin tocar teclado ni mouse al menos este tiempo, para que el reinicio no se note.</summary>
+    private static readonly TimeSpan UpdateRequiredIdle = TimeSpan.FromMinutes(2);
+    /// <summary>La versión nueva tiene este tiempo para avisar que arrancó (el antivirus puede revisarla antes).</summary>
+    private static readonly TimeSpan UpdateStartTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>null si esta instalación se actualiza sola; si no, el motivo (para la configuración).</summary>
+    public string? UpdateUnavailableReason { get; private set; }
+
+    /// <summary>Estado de la actualización automática para la configuración.</summary>
+    public string UpdateStatusText
+    {
+        get
+        {
+            if (UpdateUnavailableReason != null) return UpdateUnavailableReason;
+            if (_stagedVersion != null)
+                return $"La versión {_stagedVersion.ToString(3)} ya está descargada: se aplica sola cuando no estés usando la PC.";
+            var result = _updater?.LastResult;
+            var when = _updater?.LastCheckUtc;
+            if (result == null || when == null)
+                return Settings.AutoUpdate ? "Se busca un rato después de arrancar y después una vez por día." : "Desactivada.";
+            var at = when.Value.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+            return result.Outcome switch
+            {
+                UpdateOutcome.UpToDate => $"Al día (se buscó a las {at}).",
+                UpdateOutcome.NotWritable => "No se puede actualizar sola: la carpeta del programa no admite escritura. Instalá una vez SusurroSetup.exe 2.2.0 o posterior.",
+                _ => $"No se pudo buscar a las {at} (¿sin internet?). Se reintenta en 24 horas.",
+            };
+        }
+    }
+
+    private void StartUpdater()
+    {
+        var exe = AppPaths.ExecutablePath;
+#if DEBUG
+        UpdateUnavailableReason = "Compilación de desarrollo: no se actualiza sola.";
+#else
+        if (Args.Profile != null)
+            UpdateUnavailableReason = "Perfil de desarrollo: no se actualiza solo.";
+        else if (!string.Equals(Path.GetFileName(exe), "Susurro.exe", StringComparison.OrdinalIgnoreCase))
+            UpdateUnavailableReason = "Solo se actualiza sola la versión publicada (Susurro.exe).";
+#endif
+        if (UpdateUnavailableReason != null) return;
+
+        Updater.CleanupLeftovers(exe); // lo que quedó de la versión anterior
+        if (Args.UpdatedFrom != null) Log.Info("update", $"Actualizado a {Version}");
+        _updater = new Updater(new UpdateOptions
+        {
+            CurrentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new System.Version(1, 0, 0),
+            ExecutablePath = exe,
+        });
+        _updater.Staged += v => _ui.BeginInvoke(() => OnUpdateStaged(v));
+        if (Settings.AutoUpdate) _updater.Start();
+    }
+
+    private void OnUpdateStaged(System.Version version)
+    {
+        if (_exiting) return;
+        _stagedVersion = version;
+        if (Settings.AutoUpdate) ScheduleUpdateRestart(TimeSpan.FromMinutes(1));
+    }
+
+    private void ScheduleUpdateRestart(TimeSpan delay)
+    {
+        _updateRestartTimer.Stop();
+        _updateRestartTimer.Interval = delay;
+        _updateRestartTimer.Start();
+    }
+
+    private void OnUpdateRestartTimer()
+    {
+        _updateRestartTimer.Stop();
+        if (_exiting || _restartingForUpdate || _stagedVersion is not System.Version version || !Settings.AutoUpdate) return;
+        if (!CanRestartUnnoticed())
+        {
+            ScheduleUpdateRestart(UpdateRestartRetry);
+            return;
+        }
+        _ = RestartForUpdateAsync(version);
+    }
+
+    /// <summary>Nada abierto ni en pantalla, nada pendiente de enviar o recibir y la persona sin usar la PC.</summary>
+    private bool CanRestartUnnoticed() =>
+        !AnyWindowVisible() && _overlay.IsIdle && _files.IsEmpty && _typing.Count == 0 && !Link.IsBusy &&
+        Native.NativeMethods.IdleTime() >= UpdateRequiredIdle;
+
+    /// <summary>
+    /// Lanza la versión nueva (oculta en la bandeja) y termina. Si la nueva no avisa que arrancó,
+    /// se la detiene, se vuelve al ejecutable anterior y esta sigue funcionando como si nada.
+    /// </summary>
+    private async Task RestartForUpdateAsync(System.Version version)
+    {
+        _restartingForUpdate = true;
+        var exe = AppPaths.ExecutablePath;
+        Log.Info("update", $"Reiniciando para usar la versión {version.ToString(3)}");
+        using var started = new EventWaitHandle(false, EventResetMode.ManualReset, SingleInstance.UpdateStartedEventName(Environment.ProcessId));
+        Process? process = null;
+        try
+        {
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) ?? "" };
+            psi.ArgumentList.Add("--updated");
+            psi.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("--minimized");
+            process = Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("update", "No se pudo iniciar la versión nueva", ex);
+        }
+
+        var ok = process != null && await Task.Run(() => started.WaitOne(UpdateStartTimeout));
+        if (ok)
+        {
+            process!.Dispose();
+            await ExitAsync();
+            return;
+        }
+
+        try
+        {
+            if (process is { HasExited: false }) process.Kill();
+        }
+        catch
+        {
+        }
+        process?.Dispose();
+        Updater.Rollback(exe);
+        _updater?.Reject(version);
+        _stagedVersion = null;
+        _restartingForUpdate = false;
+    }
 
     public async Task ExitAsync()
     {
@@ -723,6 +899,9 @@ internal sealed class AppController : IDisposable
         NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
         _trimTimer.Stop();
         _typingTimer.Stop();
+        _updateRestartTimer.Stop();
+        _updater?.Dispose();
+        _updater = null;
         _tray?.Dispose();
         _tray = null;
         _hotkey?.Dispose();

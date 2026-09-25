@@ -124,4 +124,24 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(IntPtr hIcon);
+
+    // --- inactividad (para reiniciar tras una actualización sin que se note)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+
+    /// <summary>Tiempo desde la última tecla o movimiento del mouse (una consulta, sin ganchos).</summary>
+    public static TimeSpan IdleTime()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
+        return TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.dwTime));
+    }
 }

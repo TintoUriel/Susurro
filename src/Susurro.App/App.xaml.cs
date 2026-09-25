@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -25,7 +27,12 @@ public partial class App : Application
             return;
         }
 
-        var instance = SingleInstance.TryAcquire(args.Profile);
+        if (args.UpdatedFrom is int oldPid) WaitForPreviousVersion(oldPid);
+
+        // Tras una actualización no se le pide a la anterior que se muestre: sería justo lo que se evita.
+        var instance = args.UpdatedFrom == null
+            ? SingleInstance.TryAcquire(args.Profile)
+            : SingleInstance.TryAcquire(args.Profile, showExisting: false, waitForExisting: TimeSpan.FromSeconds(20));
         if (instance == null)
         {
             Shutdown(0); // ya está abierta: se le pidió que muestre su ventana
@@ -44,6 +51,31 @@ public partial class App : Application
 
         _controller = new AppController(args, instance, Dispatcher);
         _controller.Start();
+    }
+
+    /// <summary>
+    /// Versión nueva lanzada por la actualización automática: le avisa a la anterior que arrancó (si no,
+    /// la anterior vuelve atrás) y espera a que termine para tomar su lugar (instancia única, puerto).
+    /// </summary>
+    private static void WaitForPreviousVersion(int oldPid)
+    {
+        try
+        {
+            if (EventWaitHandle.TryOpenExisting(SingleInstance.UpdateStartedEventName(oldPid), out var started))
+            {
+                using (started) started.Set();
+            }
+            using var old = Process.GetProcessById(oldPid);
+            old.WaitForExit(20_000);
+        }
+        catch (ArgumentException)
+        {
+            // ya terminó
+        }
+        catch (Exception)
+        {
+            // sin acceso al proceso: la instancia única decide
+        }
     }
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

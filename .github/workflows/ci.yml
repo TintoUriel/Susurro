@@ -1,0 +1,119 @@
+# Integración continua de Susurro.
+#  - Cada push y cada pull request: tests de Core + publicación de Susurro.exe + instalador (Windows).
+#  - Un tag vX.Y.Z (igual a la versión de Directory.Build.props): además crea la release de GitHub con
+#    Susurro.exe, SusurroSetup.exe y susurro-update.json, el manifiesto que usa la actualización automática.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Tests y publicación
+    # Los PR desde este mismo repositorio ya corren por el push de su rama.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Versión
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Select-Xml -Path Directory.Build.props -XPath "//Version").Node.InnerText.Trim()
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $tag = $env:GITHUB_REF_NAME.Substring(1)
+            if ($tag -ne $version) {
+              Write-Error "El tag v$tag no coincide con la versión de Directory.Build.props ($version). Subí la versión ahí y volvé a crear el tag."
+              exit 1
+            }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Versión $version"
+
+      - name: Tests
+        run: dotnet test tests/Susurro.Core.Tests -c Release --blame-hang-timeout 5m
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Publicación e instalador
+        shell: pwsh
+        run: ./scripts/build.ps1 -Version ${{ steps.version.outputs.version }} -SkipTests
+
+      - name: Manifiesto de actualización
+        shell: pwsh
+        run: |
+          $exe = "artifacts/release/Susurro.exe"
+          $v = "${{ steps.version.outputs.version }}"
+          [ordered]@{
+            version = $v
+            url     = "https://github.com/${{ github.repository }}/releases/download/v$v/Susurro.exe"
+            sha256  = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            size    = (Get-Item $exe).Length
+          } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM artifacts/release/susurro-update.json
+          Get-Content artifacts/release/susurro-update.json
+
+      # Solo main y los tags guardan los binarios (~200 MB por ejecución).
+      - name: Guardar binarios
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v5
+        with:
+          name: Susurro-${{ steps.version.outputs.version }}
+          path: |
+            artifacts/release/Susurro.exe
+            artifacts/release/susurro-update.json
+            artifacts/installer/SusurroSetup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Release de GitHub
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: Susurro-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Crear release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/release/Susurro.exe \
+            dist/installer/SusurroSetup.exe \
+            dist/release/susurro-update.json \
+            --title "Susurro ${{ needs.build.outputs.version }}" \
+            --generate-notes

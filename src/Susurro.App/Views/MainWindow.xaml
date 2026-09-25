@@ -6,7 +6,8 @@
         Icon="/Assets/Susurro.ico"
         Width="340" SizeToContent="Height"
         WindowStartupLocation="Manual"
-        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop"
+        PreviewKeyDown="Window_PreviewKeyDown">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="34" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
@@ -22,6 +23,8 @@
         <Grid Height="34">
             <TextBlock Text="SUSURRO" Style="{StaticResource AppTitle}" Margin="16,0,0,0" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Style="{StaticResource ChromeButton}" Content="&#xE765;" FontSize="13" ToolTip="Atajos de teclado (F1)"
+                        AutomationProperties.Name="Atajos de teclado" Click="Shortcuts_Click" />
                 <Button x:Name="SettingsButton" Style="{StaticResource ChromeButton}" Content="&#xE713;" FontSize="12" ToolTip="Configuración" Click="Settings_Click" />
                 <Button Style="{StaticResource ChromeButton}" Content="&#xE921;" ToolTip="Minimizar" Click="Minimize_Click" />
                 <Button x:Name="CloseButton" Style="{StaticResource ChromeCloseButton}" Content="&#xE8BB;" ToolTip="Cerrar (Susurro sigue en la bandeja)" Click="Close_Click" />

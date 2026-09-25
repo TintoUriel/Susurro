@@ -10,7 +10,7 @@
     <ApplicationIcon>Assets\Susurro.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyTitle>Susurro</AssemblyTitle>
-    <Description>Mensajes breves entre dos PCs de la LAN, mostrados como subtítulo discreto.</Description>
+    <Description>Susurro, para evitar los gritos en la oficina: mensajes breves entre las PCs de la LAN, mostrados como subtítulo discreto.</Description>
 
     <!-- Bajo consumo: GC de estación de trabajo sin hilo concurrente en segundo plano. -->
     <ServerGarbageCollection>false</ServerGarbageCollection>

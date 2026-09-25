@@ -9,7 +9,8 @@ Susurro: mensajes breves (≤ 300 caracteres), imágenes (Ctrl+V) y archivos ent
 oficina (misma LAN), mostrados como un subtítulo overlay que no roba el foco (los archivos, como tarjetas
 arriba a la izquierda para descargar o cerrar), con aviso de "está escribiendo". Cada persona elige a quién escribirle (o a todos los
 conectados). P2P directo por TCP en malla, sin servidor, sin nube, sin historial, **sin códigos**: las
-PCs se encuentran solas y cada una se identifica con su clave pública.
+PCs se encuentran solas y cada una se identifica con su clave pública. Se actualiza sola desde las
+releases de GitHub, sin avisar (lema: *Susurro, para evitar los gritos en la oficina*).
 
 ## Comandos
 
@@ -20,7 +21,11 @@ dotnet test tests/Susurro.Core.Tests --filter "FullyQualifiedName~PeerLinkIntegr
 dotnet publish src/Susurro.App -c Release -p:PublishProfile=win-x64   # → artifacts/publish/win-x64/Susurro.exe
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1            # tests + publish + instalador (Inno Setup)
 powershell -ExecutionPolicy Bypass -File scripts/run-two-instances.ps1 [-Reset]   # dos instancias locales (perfiles A/B)
+git tag v2.3.0 && git push origin v2.3.0     # release: antes subir <Version> en Directory.Build.props (el CI lo exige)
 ```
+
+- CI en [.github/workflows/ci.yml](.github/workflows/ci.yml) (Windows): tests, publicación e instalador en cada
+  push/PR; con un tag `vX.Y.Z` crea la release con `Susurro.exe`, `SusurroSetup.exe` y `susurro-update.json`.
 
 - SDK .NET 8 fijado en [global.json](global.json). La versión del producto está en [Directory.Build.props](Directory.Build.props).
 - Solo compila/ejecuta en Windows (WPF, Win32, DPAPI).
@@ -49,6 +54,12 @@ Claves del modelo:
   **duerme** hasta un evento). Un contacto se crea solo tras completar el saludo; los datagramas UDP
   de ids desconocidos disparan un intento de conexión con límites (`MaxConcurrentProbes`, `MaxQueuedProbes`).
 - Sin nombre elegido (`AppController.IsReady`) no se llama a `Link.Start()`: nunca se muestra el nombre del equipo.
+- Actualización (`Core/Updates/Updater`): manifiesto `susurro-update.json` de la última release → descarga a
+  `Susurro.exe.download` → tamaño + SHA-256 → el `.exe` en uso pasa a `.old` y el nuevo toma su nombre. La App
+  (`AppController`, sección "actualización automática") reinicia con `--updated PID` solo cuando no se nota; la
+  nueva avisa por un evento con nombre y, si no avisa en 60 s, `Updater.Rollback`.
+- Atajos: la ventana `Views/ShortcutsWindow` (F1, botón ⌨, menú de la bandeja) lista todos; si agregás un
+  atajo, sumalo ahí y al README.
 
 ## Reglas del proyecto (no romper)
 
@@ -56,7 +67,8 @@ Claves del modelo:
 - **Cero CPU en reposo**: nada de sondeo, bucles ni temporizadores periódicos. Usar I/O asíncrona,
   temporizadores de un disparo y eventos. Nada de tráfico de red periódico: con compañeros apagados no se
   reintenta salvo que haya mensajes esperando o se haya perdido la conexión hace poco (`RetryWindow`).
-  El único tráfico en reposo es el latido tras 30 s sin tráfico por sesión.
+  El único tráfico en reposo es el latido tras 30 s sin tráfico por sesión, y fuera de la LAN solo la
+  búsqueda de actualizaciones: una consulta HTTPS a GitHub por día (temporizador de un disparo).
 - **Bajo consumo de memoria**: GC de estación sin concurrencia, overlay y ventanas que se destruyen al cerrarse,
   sin WinForms (bandeja con `Shell_NotifyIcon` propio), JSON con source-gen ([SusurroJson.cs](src/Susurro.Core/Protocol/SusurroJson.cs)).
 - **Publicación**: single-file autocontenido, **sin compresión** (duplica la RAM) y **sin trimming** (WPF no lo admite).
@@ -74,6 +86,10 @@ Claves del modelo:
   `id == hash(clave)` y la prueba HMAC antes de aceptar a alguien. Validar tamaños de trama **antes** de
   reservar memoria. La clave privada en disco se protege con DPAPI. Cambios de protocolo → subir
   `ProtocolConstants.Version` y actualizar [docs/PROTOCOL.md](docs/PROTOCOL.md).
+- **Actualizaciones**: descargar solo por HTTPS desde `github.com`/`*.githubusercontent.com`; verificar tamaño
+  y SHA-256 **antes** de tocar el ejecutable; nunca dejar un `.exe` a medias; reiniciar solo sin ventanas,
+  sin nada en pantalla ni pendiente y con la persona inactiva. El instalador deja `{app}` con `users-modify`
+  para que se pueda reemplazar sin administrador.
 - **Privacidad**: no persistir mensajes ni loguear su contenido. Mensajes en espera: solo en memoria, 2 min, máx. 20 por persona.
 - Sin sonidos, sin ventanas emergentes, sin frameworks visuales: el estilo está todo en [Themes/Dark.xaml](src/Susurro.App/Themes/Dark.xaml).
 - Win32 P/Invoke centralizado en [Native/NativeMethods.cs](src/Susurro.App/Native/NativeMethods.cs).

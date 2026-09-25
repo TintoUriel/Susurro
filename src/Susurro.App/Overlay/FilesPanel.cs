@@ -29,6 +29,9 @@ internal sealed class FilesPanel : IDisposable
 
     public FilesPanel(Func<OverlaySettings> settings) => _settings = settings;
 
+    /// <summary>No hay tarjetas de archivos en pantalla.</summary>
+    public bool IsEmpty => _cards.Count == 0;
+
     public event Action<string>? DownloadRequested;
     /// <summary>Cerrar la tarjeta (si estaba descargando, cancela).</summary>
     public event Action<string>? CloseRequested;

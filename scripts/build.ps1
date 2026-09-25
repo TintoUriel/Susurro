@@ -5,15 +5,19 @@
 .EXAMPLE
   .\scripts\build.ps1                 # tests + publicación (Susurro.exe único) + instalador
   .\scripts\build.ps1 -SkipTests
-  .\scripts\build.ps1 -Version 1.0.1
+  .\scripts\build.ps1 -Version 1.0.1  # por defecto, la versión de Directory.Build.props
 #>
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "",
     [switch]$SkipTests
 )
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $root
+if (-not $Version) {
+    $Version = (Select-Xml -Path (Join-Path $root "Directory.Build.props") -XPath "//Version").Node.InnerText.Trim()
+}
+Write-Host "Versión $Version" -ForegroundColor Cyan
 
 if (-not $SkipTests) {
     Write-Host "== Tests" -ForegroundColor Cyan

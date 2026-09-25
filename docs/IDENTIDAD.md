@@ -71,3 +71,18 @@ llenar la lista (los contactos se agregan solo tras verificar la identidad, con 
   aparece como un contacto **distinto** (otro id): los mensajes que le mandás al contacto que ya
   tenías siguen yendo solo a la PC original. Ante la duda, en *Personas* se ve la IP de cada uno.
 * Alguien con acceso a la sesión de Windows del usuario (puede usar Susurro directamente).
+
+## Actualizaciones automáticas
+
+La actualización no pasa por la red de la oficina: cada PC baja la versión nueva de la release de
+GitHub del repositorio, por HTTPS.
+
+* El manifiesto (`susurro-update.json`) se pide a `github.com` y solo se aceptan descargas por HTTPS
+  desde `github.com` o `*.githubusercontent.com`. Antes de tocar el ejecutable se verifican el
+  **tamaño y el SHA-256** del manifiesto; si no coinciden, se borra la descarga y no cambia nada.
+* La confianza es la misma que al bajar `Susurro.exe` a mano desde Releases: quien controle la
+  cuenta de GitHub del repositorio (o su CI) puede publicar una versión. Protegé esa cuenta con 2FA.
+* Para reemplazarse sin permisos de administrador, el instalador deja la carpeta del programa con
+  permiso de escritura para los usuarios de la PC. Un programa que ya corre como ese usuario podría
+  cambiar `Susurro.exe`; no le da más permisos de los que ya tiene, pero conviene saberlo en PCs
+  compartidas. Si no lo querés, desactivá *Actualizar automáticamente* y quitá ese permiso.

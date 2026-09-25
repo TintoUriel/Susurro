@@ -49,8 +49,19 @@ Name: "firewall"; Description: "Permitir Susurro en el Firewall de Windows (rede
 Name: "firewall\public"; Description: "También en redes públicas (solo si la red de la oficina figura como pública)"; Flags: unchecked
 Name: "desktopicon"; Description: "Crear acceso directo en el escritorio"; Flags: unchecked
 
+[Dirs]
+; La actualización automática reemplaza Susurro.exe sin pedir permisos de administrador (y sin cambiar
+; la ruta, así la regla de firewall sigue valiendo): la carpeta del programa admite escritura de los usuarios.
+Name: "{app}"; Permissions: users-modify
+
 [Files]
-Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Permissions: users-modify
+
+[UninstallDelete]
+; Restos de una actualización automática (copia anterior, descarga, versión descartada).
+Type: files; Name: "{app}\{#AppExe}.old"
+Type: files; Name: "{app}\{#AppExe}.download"
+Type: files; Name: "{app}\{#AppExe}.bad"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"

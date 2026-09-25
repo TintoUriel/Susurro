@@ -18,6 +18,7 @@ namespace Susurro.App.Views;
 
 public partial class SettingsWindow : Window
 {
+    public const int GeneralTab = 0;
     public const int PeopleTab = 3;
 
     private readonly AppController _app;
@@ -116,6 +117,9 @@ public partial class SettingsWindow : Window
         StartMinBox.IsChecked = _edit.StartMinimized;
         TrayBox.IsChecked = _edit.ShowTrayIcon;
         ConfirmBox.IsChecked = _edit.ConfirmDelivery;
+        AutoUpdateBox.IsChecked = _edit.AutoUpdate;
+        AutoUpdateBox.IsEnabled = _app.UpdateUnavailableReason == null;
+        UpdateStatus.Text = _app.UpdateStatusText;
         _hotkeyText = _edit.SendHotkey;
         ShowHotkey();
 
@@ -484,6 +488,7 @@ public partial class SettingsWindow : Window
         _edit.StartMinimized = StartMinBox.IsChecked == true;
         _edit.ShowTrayIcon = TrayBox.IsChecked == true;
         _edit.ConfirmDelivery = ConfirmBox.IsChecked == true;
+        _edit.AutoUpdate = AutoUpdateBox.IsChecked == true;
         _edit.SendHotkey = _hotkeyText;
         _edit.Overlay = ReadOverlay();
         _edit.Port = port;
@@ -499,6 +504,8 @@ public partial class SettingsWindow : Window
     private void TestUrgent_Click(object sender, RoutedEventArgs e) => _app.ShowTestMessage(ReadOverlay(), urgent: true);
 
     private void ViewLog_Click(object sender, RoutedEventArgs e) => _app.ShowLog();
+
+    private void Shortcuts_Click(object sender, RoutedEventArgs e) => _app.ShowShortcuts();
 
     private void OpenFolder_Click(object sender, RoutedEventArgs e) => _app.OpenDataFolder();
 }

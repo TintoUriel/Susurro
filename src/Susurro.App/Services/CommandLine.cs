@@ -13,6 +13,8 @@ namespace Susurro.App.Services;
 ///   --autostart             lanzado por Windows al iniciar sesión (arranca oculto)
 ///   --set-autostart on|off  activa/desactiva el inicio con Windows y termina (lo usa el instalador)
 ///   --uninstall-cleanup     quita el inicio con Windows y termina (lo usa el desinstalador)
+///   --updated PID           versión nueva recién instalada por la actualización automática: avisa que
+///                           arrancó y espera a que termine la anterior (PID) antes de tomar su lugar
 /// </summary>
 internal sealed class CommandLine
 {
@@ -23,6 +25,7 @@ internal sealed class CommandLine
     public bool AutoStart { get; private set; }
     public bool? SetAutoStart { get; private set; }
     public bool UninstallCleanup { get; private set; }
+    public int? UpdatedFrom { get; private set; }
 
     public bool IsMaintenanceCommand => SetAutoStart.HasValue || UninstallCleanup;
 
@@ -61,6 +64,9 @@ internal sealed class CommandLine
                     break;
                 case "--uninstall-cleanup":
                     c.UninstallCleanup = true;
+                    break;
+                case "--updated":
+                    if (int.TryParse(Next(), out var pid) && pid > 0) c.UpdatedFrom = pid;
                     break;
             }
         }

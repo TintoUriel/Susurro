@@ -74,12 +74,19 @@
                         <WrapPanel Margin="0,4,0,0">
                             <Button Style="{StaticResource LinkButton}" Content="Restablecer (Ctrl + Shift + Espacio)" FontSize="12" Click="HotkeyReset_Click" />
                             <Button Style="{StaticResource LinkButton}" Content="Desactivar" FontSize="12" Margin="16,0,0,0" Click="HotkeyClear_Click" />
+                            <Button Style="{StaticResource LinkButton}" Content="Ver todos los atajos" FontSize="12" Margin="16,0,0,0" Click="Shortcuts_Click" />
                         </WrapPanel>
 
                         <TextBlock Text="MENSAJES" Style="{StaticResource SectionHeader}" />
                         <CheckBox x:Name="ConfirmBox" Content="Confirmar recepción (Entregado / Visto)" />
                         <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
                                    Text="Al enviar, muestra cuándo la otra persona recibió el mensaje y cuándo lo vio en pantalla. No se guarda ningún historial de mensajes." />
+
+                        <TextBlock Text="ACTUALIZACIONES" Style="{StaticResource SectionHeader}" />
+                        <CheckBox x:Name="AutoUpdateBox" Content="Actualizar automáticamente" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                                   Text="Una vez por día Susurro busca una versión nueva en GitHub, la verifica y la instala sola. Se reinicia en un momento en que no estés usando la PC, sin avisos ni ventanas." />
+                        <TextBlock x:Name="UpdateStatus" Style="{StaticResource Caption}" Margin="0,6,0,0" Foreground="{StaticResource FaintBrush}" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

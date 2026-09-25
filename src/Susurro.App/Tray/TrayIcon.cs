@@ -18,7 +18,7 @@ namespace Susurro.App.Tray;
 /// Icono en la bandeja del sistema implementado directamente con Shell_NotifyIcon
 /// (sin WinForms: ~20 MB menos en disco y menos memoria).
 ///  - Clic izquierdo: mostrar/ocultar la ventana.
-///  - Clic derecho: menú (Mostrar ventana, Ocultar ventana, Configuración, Salir) con el tema oscuro.
+///  - Clic derecho: menú (Mostrar ventana, Ocultar ventana, Configuración, Atajos de teclado, Salir) con el tema oscuro.
 ///  - Punto de estado en el icono: verde conectado / ámbar conectando / gris desconectado.
 ///  - Si el Explorador de Windows se reinicia, el icono se vuelve a agregar solo (mensaje TaskbarCreated).
 /// </summary>
@@ -44,7 +44,7 @@ internal sealed class TrayIcon : IDisposable
     private bool _added;
     private bool _disposed;
 
-    public TrayIcon(Action toggleMain, Action showMain, Action hideMain, Action showSettings, Action exit, Func<bool> isMainVisible)
+    public TrayIcon(Action toggleMain, Action showMain, Action hideMain, Action showSettings, Action showShortcuts, Action exit, Func<bool> isMainVisible)
     {
         _toggleMain = toggleMain;
         _isMainVisible = isMainVisible;
@@ -66,12 +66,15 @@ internal sealed class TrayIcon : IDisposable
         _hide.Click += (_, _) => hideMain();
         var settings = new MenuItem { Header = "Configuración" };
         settings.Click += (_, _) => showSettings();
+        var shortcuts = new MenuItem { Header = "Atajos de teclado" };
+        shortcuts.Click += (_, _) => showShortcuts();
         var quit = new MenuItem { Header = "Salir" };
         quit.Click += (_, _) => exit();
         _menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         _menu.Items.Add(_show);
         _menu.Items.Add(_hide);
         _menu.Items.Add(settings);
+        _menu.Items.Add(shortcuts);
         _menu.Items.Add(new Separator());
         _menu.Items.Add(quit);
 
