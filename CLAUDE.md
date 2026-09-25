@@ -22,6 +22,7 @@ dotnet publish src/Susurro.App -c Release -p:PublishProfile=win-x64   # → arti
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1            # tests + publish + instalador (Inno Setup)
 powershell -ExecutionPolicy Bypass -File scripts/run-two-instances.ps1 [-Reset]   # dos instancias locales (perfiles A/B)
 git tag v2.3.0 && git push origin v2.3.0     # release: antes subir <Version> en Directory.Build.props (el CI lo exige)
+                                             # o Actions → CI → Run workflow en main con «publicar» (crea el tag)
 ```
 
 - CI en [.github/workflows/ci.yml](.github/workflows/ci.yml) (Windows): tests, publicación e instalador en cada
