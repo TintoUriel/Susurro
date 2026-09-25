@@ -46,15 +46,16 @@
             <TabItem Header="General">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,6,18,16">
                     <StackPanel>
-                        <TextBlock Text="ESTA PC" Style="{StaticResource SectionHeader}" />
-                        <TextBlock Text="Nombre de esta PC" Margin="0,0,0,6" />
-                        <TextBox x:Name="NameBox" MaxLength="32" Tag="Por ejemplo: Tinto, Oficina" />
-                        <TextBlock x:Name="MachineInfo" Style="{StaticResource Caption}" Margin="0,6,0,0" />
+                        <TextBlock Text="VOS" Style="{StaticResource SectionHeader}" />
+                        <TextBlock Text="Tu nombre" Margin="0,0,0,6" />
+                        <TextBox x:Name="NameBox" MaxLength="32" Tag="Por ejemplo: Uriel" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                   Text="Así te ven tus compañeros en su lista y en los mensajes que les mandás." />
 
                         <TextBlock Text="INICIO" Style="{StaticResource SectionHeader}" />
                         <CheckBox x:Name="AutoStartBox" Content="Iniciar con Windows" />
                         <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,6"
-                                   Text="Al encender la PC, Susurro arranca oculto en la bandeja y se conecta solo con la otra PC." />
+                                   Text="Al encender la PC, Susurro arranca oculto en la bandeja y se conecta solo con tus compañeros." />
                         <CheckBox x:Name="StartMinBox" Content="Iniciar minimizado en la bandeja" />
                         <CheckBox x:Name="TrayBox" Content="Mostrar icono en la bandeja del sistema" />
 
@@ -78,7 +79,7 @@
                         <TextBlock Text="MENSAJES" Style="{StaticResource SectionHeader}" />
                         <CheckBox x:Name="ConfirmBox" Content="Confirmar recepción (Entregado / Visto)" />
                         <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
-                                   Text="Al enviar, muestra cuándo la otra PC recibió el mensaje y cuándo lo mostró en pantalla. No se guarda ningún historial de mensajes." />
+                                   Text="Al enviar, muestra cuándo la otra persona recibió el mensaje y cuándo lo vio en pantalla. No se guarda ningún historial de mensajes." />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -193,28 +194,38 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!-- ================================================= Conexión -->
-            <TabItem Header="Conexión">
+            <!-- ================================================= Personas -->
+            <TabItem Header="Personas">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,6,18,16">
                     <StackPanel>
-                        <TextBlock Text="PC VINCULADA" Style="{StaticResource SectionHeader}" />
-                        <TextBlock x:Name="PeerName" FontSize="15" FontWeight="SemiBold" />
-                        <TextBlock x:Name="PeerInfo" Style="{StaticResource Caption}" Margin="0,3,0,0" />
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <DockPanel Margin="0,16,0,8">
+                            <Button x:Name="SearchButton" DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="Buscar de nuevo"
+                                    FontSize="12" Click="Search_Click" ToolTip="Busca a todos en la red y reconecta con los desconectados" />
+                            <TextBlock Text="PERSONAS EN LA RED" Style="{StaticResource SectionHeader}" Margin="0" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="ConnDot" Text="○" Width="14" VerticalAlignment="Center" />
                             <TextBlock x:Name="ConnText" VerticalAlignment="Center" />
                         </StackPanel>
                         <TextBlock x:Name="ConnDetail" Style="{StaticResource Caption}" Margin="14,3,0,0" />
-                        <WrapPanel Margin="0,10,0,0">
-                            <Button x:Name="ReconnectButton" Content="Reconectar ahora" Click="Reconnect_Click" Margin="0,0,8,6" />
-                            <Button Content="Volver a vincular…" Click="Repair_Click" Margin="0,0,8,6" />
-                            <Button x:Name="UnpairButton" Content="Desvincular" Click="Unpair_Click" Margin="0,0,8,6" />
+                        <ListBox x:Name="ContactsList" Height="170" Margin="0,8,0,0" SelectionChanged="ContactsList_SelectionChanged"
+                                 AutomationProperties.Name="Personas en la red" />
+                        <TextBlock x:Name="ContactsEmpty" Style="{StaticResource Caption}" Margin="0,4,0,0" FontSize="11" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button x:Name="BlockButton" Content="Bloquear" Click="Block_Click" Margin="0,0,8,6" IsEnabled="False"
+                                    ToolTip="No aceptar conexiones ni mensajes de esta persona" />
+                            <Button x:Name="ForgetButton" Content="Quitar de la lista" Click="Forget_Click" Margin="0,0,8,6" IsEnabled="False"
+                                    ToolTip="Para PCs que ya no se usan. Si vuelve a conectarse, aparece de nuevo." />
                         </WrapPanel>
 
-                        <TextBlock Text="DIRECCIÓN DE LA OTRA PC" Style="{StaticResource SectionHeader}" />
-                        <TextBox x:Name="ManualBox" Tag="Automática (descubrimiento en la red)" />
-                        <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
-                                   Text="Opcional. IP, IP:puerto o nombre del equipo. Solo hace falta si el descubrimiento automático no funciona en tu red." />
+                        <TextBlock Text="AGREGAR POR DIRECCIÓN" Style="{StaticResource SectionHeader}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBox x:Name="AddressBox" Tag="IP, IP:puerto o nombre del equipo" KeyDown="AddressBox_KeyDown" />
+                            <Button x:Name="AddButton" Grid.Column="1" Content="Conectar" Margin="8,0,0,0" Click="Add_Click" />
+                        </Grid>
+                        <TextBlock x:Name="AddStatus" Style="{StaticResource Caption}" Margin="0,6,0,0"
+                                   Text="Solo hace falta si alguien no aparece solo (redes separadas o descubrimiento bloqueado). Se recuerda para reconectar." />
 
                         <TextBlock Text="ESTA PC" Style="{StaticResource SectionHeader}" />
                         <TextBlock x:Name="LocalInfo" Style="{StaticResource Caption}" />
@@ -225,7 +236,7 @@
                             <TextBlock x:Name="PortHint" Grid.Column="2" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="10,0,0,0" />
                         </Grid>
                         <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0"
-                                   Text="Cada PC puede usar su propio puerto; la otra lo aprende al conectarse. Al cambiarlo se reinicia la conexión y puede requerir una regla de firewall nueva." />
+                                   Text="Cada PC puede usar su propio puerto; las demás lo aprenden al conectarse. Al cambiarlo se reinicia la conexión y puede requerir una regla de firewall nueva." />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

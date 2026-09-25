@@ -9,7 +9,8 @@ public sealed record WhisperMessage(
     bool Urgent,
     long Seq,
     bool WantsReceipt,
-    bool IsTest = false)
+    bool IsTest = false,
+    string? SenderId = null)
 {
     /// <summary>Orden de llegada local (lo asigna la cola; desempata mensajes sin secuencia comparable).</summary>
     public long ArrivalOrder { get; init; }

@@ -151,11 +151,12 @@ public class ProtocolTests
     [Fact]
     public void Discovery_packet_roundtrip_and_garbage_is_ignored()
     {
-        var p = new DiscoveryPacket { T = DiscoveryPacket.Query, Id = new string('c', 32), Name = "Tinto", Port = 47810, Pairing = true };
+        var p = new DiscoveryPacket { T = DiscoveryPacket.Query, Id = new string('c', 32), Name = "Tinto", Port = 47810 };
         var back = SusurroJson.TryDeserializeDiscovery(SusurroJson.Serialize(p));
         Assert.NotNull(back);
         Assert.Equal("Tinto", back!.Name);
-        Assert.True(back.Pairing);
+        Assert.Equal(47810, back.Port);
+        Assert.Equal(ProtocolConstants.Version, back.V);
 
         Assert.Null(SusurroJson.TryDeserializeDiscovery(Encoding.UTF8.GetBytes("hola")));
         Assert.Null(SusurroJson.TryDeserializeDiscovery(Encoding.UTF8.GetBytes("{\"s\":\"otra-app\",\"id\":\"x\"}")));

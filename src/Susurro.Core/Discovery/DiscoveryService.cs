@@ -7,7 +7,7 @@ using Susurro.Core.Protocol;
 
 namespace Susurro.Core.Discovery;
 
-public sealed record DiscoveredInstance(string InstanceId, string Name, IPAddress Address, int Port, bool PairingOpen, bool Paired)
+public sealed record DiscoveredInstance(string InstanceId, string Name, IPAddress Address, int Port)
 {
     public IPEndPoint EndPoint => new(Address, Port);
 }
@@ -17,7 +17,7 @@ public sealed record DiscoveredInstance(string InstanceId, string Name, IPAddres
 /// No genera tráfico periódico:
 ///  - Responde consultas (recepción asíncrona: 0 % CPU en reposo).
 ///  - Envía un "anuncio" solo al arrancar, al cambiar la red o al volver de suspensión.
-///  - Envía consultas solo cuando hace falta encontrar a la otra PC (y con límites de tiempo).
+///  - Envía consultas solo al arrancar, al cambiar la red o cuando hace falta encontrar a alguien.
 /// La información recibida por UDP NO es confiable: solo aporta direcciones candidatas; la
 /// identidad se verifica criptográficamente al conectar por TCP.
 /// </summary>
@@ -153,10 +153,10 @@ public sealed class DiscoveryService : IDisposable
             {
                 var r = await s.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), deadline.Token).ConfigureAwait(false);
                 var p = SusurroJson.TryDeserializeDiscovery(buffer.AsSpan(0, r.ReceivedBytes));
-                if (p == null || p.T != DiscoveryPacket.Response || p.Id == _localId) continue;
+                if (p == null || p.T != DiscoveryPacket.Response || p.Id == _localId || p.V != ProtocolConstants.Version) continue;
                 if (!SettingsValidator.IsValidInstanceId(p.Id) || p.Port is < 1 or > 65535) continue;
                 var ep = (IPEndPoint)r.RemoteEndPoint;
-                results[p.Id] = new DiscoveredInstance(p.Id, SettingsValidator.CleanName(p.Name), ep.Address, p.Port, p.Pairing, p.Paired);
+                results[p.Id] = new DiscoveredInstance(p.Id, SettingsValidator.CleanName(p.Name), ep.Address, p.Port);
                 if (targetId != null && p.Id == targetId) break;
             }
         }
@@ -192,7 +192,8 @@ public sealed class DiscoveryService : IDisposable
             {
                 if (r.ReceivedBytes > ProtocolConstants.MaxDatagram) continue;
                 var p = SusurroJson.TryDeserializeDiscovery(buffer.AsSpan(0, r.ReceivedBytes));
-                if (p == null || p.Id == _localId || !SettingsValidator.IsValidInstanceId(p.Id)) continue;
+                // Versiones incompatibles se ignoran: no podrían completar el saludo.
+                if (p == null || p.Id == _localId || p.V != ProtocolConstants.Version || !SettingsValidator.IsValidInstanceId(p.Id)) continue;
                 var remote = (IPEndPoint)r.RemoteEndPoint;
 
                 if (p.T == DiscoveryPacket.Query)
@@ -206,7 +207,7 @@ public sealed class DiscoveryService : IDisposable
 
                 if ((p.T == DiscoveryPacket.Query || p.T == DiscoveryPacket.Announce) && p.Port is >= 1 and <= 65535)
                 {
-                    PeerSeen?.Invoke(new DiscoveredInstance(p.Id, SettingsValidator.CleanName(p.Name), remote.Address, p.Port, p.Pairing, p.Paired));
+                    PeerSeen?.Invoke(new DiscoveredInstance(p.Id, SettingsValidator.CleanName(p.Name), remote.Address, p.Port));
                 }
             }
             catch (Exception ex)

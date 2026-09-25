@@ -75,7 +75,7 @@ internal sealed class TrayIcon : IDisposable
         _menu.Items.Add(new Separator());
         _menu.Items.Add(quit);
 
-        SetState(new LinkState(LinkStatus.Disconnected, null, null, null));
+        SetState(new LinkState(LinkStatus.NoContacts, 0, 0, null));
     }
 
     public void SetState(LinkState state)
@@ -89,10 +89,9 @@ internal sealed class TrayIcon : IDisposable
         _currentIcon = icon;
         _tip = state.Status switch
         {
-            LinkStatus.Connected => $"Susurro — Conectado con {state.PeerName}",
-            LinkStatus.Connecting => "Susurro — Conectando…",
-            LinkStatus.NotPaired => "Susurro — Sin vincular",
-            _ => $"Susurro — Desconectado{(state.PeerName != null ? " de " + state.PeerName : "")}",
+            LinkStatus.Online => state.Online == 1 ? "Susurro — 1 persona conectada" : $"Susurro — {state.Online} personas conectadas",
+            LinkStatus.NoneOnline => "Susurro — Nadie conectado ahora",
+            _ => "Susurro — Buscando compañeros en la red",
         };
         if (_tip.Length > 127) _tip = _tip[..126] + "…";
         Update(_added ? NIM_MODIFY : NIM_ADD);
@@ -194,8 +193,7 @@ internal sealed class TrayIcon : IDisposable
 
             var dot = status switch
             {
-                LinkStatus.Connected => Color.FromRgb(111, 191, 142),
-                LinkStatus.Connecting => Color.FromRgb(217, 169, 91),
+                LinkStatus.Online => Color.FromRgb(111, 191, 142),
                 _ => Color.FromRgb(120, 123, 130),
             };
             var r = s * 0.21;

@@ -30,9 +30,27 @@
         <!-- Composición -->
         <StackPanel Grid.Row="1" Margin="16,2,16,14">
             <DockPanel Margin="0,0,0,8" LastChildFill="True">
-                <Button x:Name="PairButton" DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="Vincular…"
-                        FontSize="12" Visibility="Collapsed" Click="Pair_Click" />
-                <TextBlock x:Name="PeerLabel" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                <TextBlock Text="Para" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <Button x:Name="SetupButton" DockPanel.Dock="Right" Style="{StaticResource LinkButton}" FontSize="12"
+                        Visibility="Collapsed" VerticalAlignment="Center" Click="SetupButton_Click" />
+                <Grid>
+                    <ComboBox x:Name="RecipientCombo" Height="28" Visibility="Collapsed" MaxDropDownHeight="320"
+                              SelectionChanged="RecipientCombo_SelectionChanged" DropDownClosed="RecipientCombo_DropDownClosed"
+                              ToolTip="A quién enviarle el mensaje (Ctrl+↑ / Ctrl+↓ para cambiar mientras escribís)"
+                              AutomationProperties.Name="Destinatario">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Dot}" Foreground="{Binding DotBrush}" Width="14" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="170" />
+                                    <TextBlock Text="{Binding Note}" Foreground="{StaticResource FaintBrush}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock x:Name="PeerLabel" Style="{StaticResource Caption}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                </Grid>
             </DockPanel>
 
             <TextBox x:Name="Input" Tag="Escribir mensaje…" MaxLength="300" TextWrapping="Wrap" AcceptsReturn="False"

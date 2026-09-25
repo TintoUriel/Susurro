@@ -13,7 +13,7 @@ public sealed record HeartbeatOptions(TimeSpan CheckInterval, TimeSpan IdleBefor
 }
 
 /// <summary>
-/// Una conexión TCP ya autenticada y cifrada con la otra PC.
+/// Una conexión TCP ya autenticada y cifrada con otra PC.
 /// - Un único bucle de lectura asíncrono (sin hilos bloqueados, sin CPU en reposo).
 /// - Envíos serializados con un semáforo.
 /// - Latido "solo cuando hace falta": quien marcó envía un ping si no recibió nada en 30 s;
@@ -33,13 +33,14 @@ internal sealed class PeerSession
     private int _closed;
 
     public PeerSession(Socket socket, NetworkStream stream, SecureChannel channel, bool isDialer, string dialerId,
-        string peerName, string peerBoot, IPEndPoint remote, int peerPort, long clockOffsetMs, HeartbeatOptions heartbeat)
+        string peerId, string peerName, string peerBoot, IPEndPoint remote, int peerPort, long clockOffsetMs, HeartbeatOptions heartbeat)
     {
         _socket = socket;
         _stream = stream;
         _channel = channel;
         IsDialer = isDialer;
         DialerId = dialerId;
+        PeerId = peerId;
         PeerName = peerName;
         PeerBoot = peerBoot;
         Remote = remote;
@@ -54,6 +55,7 @@ internal sealed class PeerSession
 
     public bool IsDialer { get; }
     public string DialerId { get; }
+    public string PeerId { get; }
     public string PeerName { get; set; }
     public string PeerBoot { get; }
     public IPEndPoint Remote { get; }
@@ -69,6 +71,8 @@ internal sealed class PeerSession
     }
     private bool _ready;
     public string? CloseReason { get; private set; }
+    /// <summary>La otra PC avisó que se cerraba (bye): no hace falta insistir en reconectar.</summary>
+    public bool ClosedByPeer { get; private set; }
 
     public event Action<PeerSession, Packet>? PacketReceived;
     public event Action<PeerSession, string>? Closed;
@@ -160,6 +164,7 @@ internal sealed class PeerSession
                     case PacketType.Pong:
                         break;
                     case PacketType.Bye:
+                        ClosedByPeer = true;
                         reason = "la otra PC cerró Susurro" + (string.IsNullOrEmpty(packet.Reason) ? "" : $" ({packet.Reason})");
                         Close(reason);
                         return;

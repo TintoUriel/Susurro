@@ -1,8 +1,11 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using Susurro.App.Overlay;
@@ -15,7 +18,10 @@ namespace Susurro.App.Views;
 
 public partial class SettingsWindow : Window
 {
+    public const int PeopleTab = 3;
+
     private readonly AppController _app;
+    private readonly CancellationTokenSource _cts = new();
     private readonly AppSettings _edit;
     private bool _loading = true;
     private bool _previewUrgent;
@@ -35,13 +41,19 @@ public partial class SettingsWindow : Window
         UpdatePreview();
         ApplyLinkState(_app.Link.State);
         _app.LinkStateChanged += ApplyLinkState;
-        _app.PeerChanged += OnPeerChanged;
+        _app.ContactsChanged += RefreshContacts;
         Closed += (_, _) =>
         {
+            _cts.Cancel();
             _app.LinkStateChanged -= ApplyLinkState;
-            _app.PeerChanged -= OnPeerChanged;
+            _app.ContactsChanged -= RefreshContacts;
             _app.ResumeHotkey(); // por si se cerró mientras se elegía un atajo
         };
+    }
+
+    public void SelectTab(int index)
+    {
+        if (index >= 0 && index < Tabs.Items.Count) Tabs.SelectedIndex = index;
     }
 
     // ------------------------------------------------------------------ carga
@@ -100,7 +112,6 @@ public partial class SettingsWindow : Window
     private void LoadValues()
     {
         NameBox.Text = _edit.FriendlyName;
-        MachineInfo.Text = $"Equipo: {Environment.MachineName}";
         AutoStartBox.IsChecked = AutoStart.IsEnabled(_app.Args.Profile) || _edit.StartWithWindows;
         StartMinBox.IsChecked = _edit.StartMinimized;
         TrayBox.IsChecked = _edit.ShowTrayIcon;
@@ -126,47 +137,156 @@ public partial class SettingsWindow : Window
         ContrastBox.IsChecked = o.HighContrast;
         UpdateSliderLabels();
 
-        ManualBox.Text = _edit.Peer?.ManualAddress ?? "";
         PortBox.Text = _edit.Port.ToString(CultureInfo.InvariantCulture);
         PortHint.Text = $"UDP {_edit.DiscoveryPort} (descubrimiento)";
-        LocalInfo.Text = $"{_edit.FriendlyName} · {Environment.MachineName} · IP {NetworkInfo.DescribeLocalAddresses()}";
+        LocalInfo.Text = $"Equipo {Environment.MachineName} · IP {NetworkInfo.DescribeLocalAddresses()} (para agregarte por dirección desde otra PC)";
         AboutText.Text = $"Susurro {AppController.Version} · id de instalación {_edit.InstanceId[..8]}…" +
                          (_app.Args.Profile != null ? $" · perfil «{_app.Args.Profile}»" : "") +
                          $"\nDatos: {_app.DataDirectory}";
-        UpdatePeerSection();
+        RefreshContacts();
     }
 
-    private void UpdatePeerSection()
+    // ------------------------------------------------------------------ personas
+
+    private void RefreshContacts()
     {
-        var peer = _app.Settings.Peer;
-        if (peer == null)
+        var selected = (ContactsList.SelectedItem as ListBoxItem)?.Tag as string;
+        var contacts = _app.Link.Contacts;
+        ContactsList.Items.Clear();
+        foreach (var c in contacts)
         {
-            PeerName.Text = "Ninguna";
-            PeerInfo.Text = "Vinculá esta PC con la otra para poder enviar mensajes.";
-            UnpairButton.IsEnabled = false;
-            ReconnectButton.IsEnabled = false;
-            ManualBox.IsEnabled = false;
+            var item = BuildContactItem(c);
+            ContactsList.Items.Add(item);
+            if (c.Id == selected) ContactsList.SelectedItem = item;
+        }
+        ContactsEmpty.Text = !_app.IsReady
+            ? "Elegí tu nombre para empezar a buscar compañeros."
+            : contacts.Count == 0
+                ? "Todavía no apareció nadie. Verificá que Susurro esté abierto en las otras PCs y que estén en la misma red."
+                : "";
+        ContactsEmpty.Visibility = ContactsEmpty.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        UpdateContactButtons();
+    }
+
+    private ListBoxItem BuildContactItem(ContactInfo c)
+    {
+        var (dot, brush, status) = c.Blocked
+            ? ("⊘", "ErrBrush", "bloqueado")
+            : c.Status switch
+            {
+                ContactStatus.Online => ("●", "OkBrush", "conectado"),
+                ContactStatus.Connecting => ("○", "WarnBrush", "conectando…"),
+                _ => ("○", "FaintBrush", "desconectado"),
+            };
+        var text = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis };
+        text.Inlines.Add(new Run(dot + "  ") { Foreground = (Brush)FindResource(brush), FontSize = 11 });
+        text.Inlines.Add(new Run(c.Name) { FontWeight = FontWeights.SemiBold });
+        var extra = status + (c.Address != null ? " · " + c.Address : "") + (c.Detail != null ? " · " + c.Detail : "");
+        text.Inlines.Add(new Run("  " + extra) { Foreground = (Brush)FindResource("MutedBrush"), FontSize = 11 });
+        return new ListBoxItem { Content = text, Tag = c.Id, ToolTip = $"id {c.Id[..8]}…" };
+    }
+
+    private ContactInfo? SelectedContact() =>
+        (ContactsList.SelectedItem as ListBoxItem)?.Tag is string id ? _app.Link.FindContact(id) : null;
+
+    private void UpdateContactButtons()
+    {
+        var c = SelectedContact();
+        BlockButton.IsEnabled = c != null;
+        BlockButton.Content = c?.Blocked == true ? "Desbloquear" : "Bloquear";
+        // Quitar solo tiene sentido con PCs desconectadas: una conectada volvería a aparecer al instante.
+        ForgetButton.IsEnabled = c != null && c.Status != ContactStatus.Online;
+    }
+
+    private void ContactsList_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateContactButtons();
+
+    private void Block_Click(object sender, RoutedEventArgs e)
+    {
+        var c = SelectedContact();
+        if (c == null) return;
+        if (!c.Blocked)
+        {
+            var answer = MessageBox.Show(this,
+                $"¿Bloquear a «{c.Name}»?\n\nNo vas a recibir sus mensajes ni va a poder conectarse con esta PC hasta que lo desbloquees.",
+                "Susurro", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+        _app.SetBlocked(c.Id, !c.Blocked);
+    }
+
+    private void Forget_Click(object sender, RoutedEventArgs e)
+    {
+        var c = SelectedContact();
+        if (c == null) return;
+        _app.ForgetContact(c.Id);
+    }
+
+    private void Search_Click(object sender, RoutedEventArgs e) => _app.Link.ReconnectNow();
+
+    private void AddressBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        e.Handled = true;
+        _ = AddAsync();
+    }
+
+    private void Add_Click(object sender, RoutedEventArgs e) => _ = AddAsync();
+
+    private async Task AddAsync()
+    {
+        var address = AddressBox.Text.Trim();
+        if (!_app.IsReady)
+        {
+            SetAddStatus("Primero elegí tu nombre.", "ErrBrush");
             return;
         }
-        PeerName.Text = peer.Name;
-        var last = peer.LastAddress != null ? $"{peer.LastAddress}:{(peer.LastPort > 0 ? peer.LastPort : AppSettings.DefaultPort)}" : "desconocida";
-        PeerInfo.Text = $"Última dirección: {last} · id {peer.InstanceId[..8]}… · vinculada el {peer.PairedUtc.ToLocalTime():d}";
-        UnpairButton.IsEnabled = true;
-        ReconnectButton.IsEnabled = true;
-        ManualBox.IsEnabled = true;
+        if (address.Length == 0)
+        {
+            SetAddStatus("Escribí la IP o el nombre del equipo de la otra PC.", "ErrBrush");
+            AddressBox.Focus();
+            return;
+        }
+        AddButton.IsEnabled = false;
+        SetAddStatus("Conectando…", "MutedBrush");
+        try
+        {
+            var r = await _app.AddContactAsync(address, _cts.Token);
+            if (r.Success && r.Contact != null)
+            {
+                SetAddStatus($"✓ Conectado con «{r.Contact.Name}».", "OkBrush");
+                AddressBox.Clear();
+            }
+            else SetAddStatus(r.Error ?? "No se pudo conectar.", "ErrBrush");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            SetAddStatus("Error inesperado: " + ex.Message, "ErrBrush");
+        }
+        finally
+        {
+            if (IsLoaded) AddButton.IsEnabled = true;
+        }
     }
 
-    private void OnPeerChanged() => UpdatePeerSection();
+    private void SetAddStatus(string text, string brushKey)
+    {
+        AddStatus.Text = text;
+        AddStatus.Foreground = (Brush)FindResource(brushKey);
+    }
 
     private void ApplyLinkState(LinkState state)
     {
-        var (symbol, brush, text) = state.Status switch
-        {
-            LinkStatus.Connected => ("●", "OkBrush", $"Conectado ({state.RemoteEndPoint})"),
-            LinkStatus.Connecting => ("○", "WarnBrush", "Conectando…"),
-            LinkStatus.NotPaired => ("○", "FaintBrush", "Sin vincular"),
-            _ => ("×", "ErrBrush", "Desconectado — reintentando automáticamente"),
-        };
+        var (symbol, brush, text) = !_app.IsReady
+            ? ("○", "FaintBrush", "Sin nombre todavía: no se busca a nadie")
+            : state.Status switch
+            {
+                LinkStatus.Online => ("●", "OkBrush", $"{state.Online} de {state.Known} conectado{(state.Known == 1 ? "" : "s")}"),
+                LinkStatus.NoneOnline => ("○", "FaintBrush", "Nadie conectado ahora — se reconectan solos al abrir Susurro"),
+                _ => ("○", "WarnBrush", "Buscando compañeros en la red…"),
+            };
         ConnDot.Text = symbol;
         ConnDot.Foreground = (Brush)FindResource(brush);
         ConnText.Text = text;
@@ -323,7 +443,8 @@ public partial class SettingsWindow : Window
     {
         if (_loading || PreviewHost == null) return;
         var text = _previewUrgent ? "VENÍ A LA OFICINA" : "Traé los papeles cuando puedas";
-        var msg = new WhisperMessage("preview", text, _app.Settings.FriendlyName, DateTimeOffset.UtcNow, _previewUrgent, 0, false, IsTest: true);
+        var sender = _app.Settings.FriendlyName.Length > 0 ? _app.Settings.FriendlyName : "Susurro";
+        var msg = new WhisperMessage("preview", text, sender, DateTimeOffset.UtcNow, _previewUrgent, 0, false, IsTest: true);
         var card = SubtitleVisual.Build(msg, ReadOverlay());
         card.MaxWidth = 560;
         PreviewHost.Content = card;
@@ -340,33 +461,24 @@ public partial class SettingsWindow : Window
         if (name.Length == 0)
         {
             Tabs.SelectedIndex = 0;
-            SaveHint.Text = "Escribí un nombre para esta PC.";
+            SaveHint.Text = "Escribí tu nombre.";
             NameBox.Focus();
             return;
         }
         if (!int.TryParse(PortBox.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1024 or > 65535)
         {
-            Tabs.SelectedIndex = 3;
+            Tabs.SelectedIndex = PeopleTab;
             SaveHint.Text = "El puerto debe estar entre 1024 y 65535.";
             PortBox.Focus();
             return;
         }
         if (port == _edit.DiscoveryPort)
         {
-            Tabs.SelectedIndex = 3;
+            Tabs.SelectedIndex = PeopleTab;
             SaveHint.Text = $"El puerto {port} lo usa el descubrimiento UDP.";
             PortBox.Focus();
             return;
         }
-        var manual = ManualBox.Text.Trim();
-        if (manual.Length > 0 && !NetworkInfo.TryParseHostPort(manual, AppSettings.DefaultPort, out _, out _))
-        {
-            Tabs.SelectedIndex = 3;
-            SaveHint.Text = "La dirección manual no es válida.";
-            ManualBox.Focus();
-            return;
-        }
-
         _edit.FriendlyName = name;
         _edit.StartWithWindows = AutoStartBox.IsChecked == true;
         _edit.StartMinimized = StartMinBox.IsChecked == true;
@@ -375,7 +487,6 @@ public partial class SettingsWindow : Window
         _edit.SendHotkey = _hotkeyText;
         _edit.Overlay = ReadOverlay();
         _edit.Port = port;
-        if (_edit.Peer != null) _edit.Peer.ManualAddress = manual.Length > 0 ? manual : null;
 
         _app.ApplySettings(_edit);
         Close();
@@ -386,23 +497,6 @@ public partial class SettingsWindow : Window
     private void TestNormal_Click(object sender, RoutedEventArgs e) => _app.ShowTestMessage(ReadOverlay(), urgent: false);
 
     private void TestUrgent_Click(object sender, RoutedEventArgs e) => _app.ShowTestMessage(ReadOverlay(), urgent: true);
-
-    private void Reconnect_Click(object sender, RoutedEventArgs e) => _app.Link.ReconnectNow();
-
-    private void Repair_Click(object sender, RoutedEventArgs e) => _app.ShowPairing();
-
-    private void Unpair_Click(object sender, RoutedEventArgs e)
-    {
-        var peer = _app.Settings.Peer;
-        if (peer == null) return;
-        var answer = MessageBox.Show(this,
-            $"¿Desvincular de «{peer.Name}»?\n\nNo se podrán enviar ni recibir mensajes hasta volver a vincular ambas PCs.",
-            "Susurro", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes) return;
-        _app.Unpair();
-        _edit.Peer = null;
-        UpdatePeerSection();
-    }
 
     private void ViewLog_Click(object sender, RoutedEventArgs e) => _app.ShowLog();
 

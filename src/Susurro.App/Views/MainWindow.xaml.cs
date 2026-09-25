@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Susurro.App.Services;
+using Susurro.Core.Config;
 using Susurro.Core.Messaging;
 using Susurro.Core.Net;
 
@@ -12,10 +15,16 @@ namespace Susurro.App.Views;
 
 public partial class MainWindow : Window
 {
+    /// <summary>Opción del selector "Para": una persona o todos los conectados.</summary>
+    public sealed record RecipientOption(string Id, string Label, string Dot, Brush DotBrush, string? Note);
+
     private readonly AppController _app;
     private readonly DispatcherTimer _feedbackTimer;
-    private string? _lastMessageId;
+    /// <summary>Estado de entrega de cada mensaje del último envío (uno por destinatario).</summary>
+    private readonly Dictionary<string, DeliveryState?> _lastSend = new();
     private bool _positioned;
+    private bool _updatingRecipients;
+    private bool _recipientsDirty;
 
     internal MainWindow(AppController app)
     {
@@ -32,8 +41,14 @@ public partial class MainWindow : Window
 
         _app.LinkStateChanged += ApplyState;
         _app.DeliveryChanged += OnDeliveryChanged;
-        _app.PeerChanged += () => ApplyState(_app.Link.State);
+        _app.ContactsChanged += RefreshRecipients;
+        _app.SetupChanged += () =>
+        {
+            ApplyState(_app.Link.State);
+            RefreshRecipients();
+        };
         ApplyState(_app.Link.State);
+        RefreshRecipients();
 
         Loaded += (_, _) => PlaceWindow();
         Activated += (_, _) => FocusInput();
@@ -94,29 +109,115 @@ public partial class MainWindow : Window
     private void ApplyState(LinkState state)
     {
         UpdateCloseTooltip();
-        var peer = _app.Settings.Peer;
-        PairButton.Visibility = peer == null ? Visibility.Visible : Visibility.Collapsed;
-        PeerLabel.Text = peer == null ? "Sin PC vinculada" : "Para: " + (state.PeerName ?? peer.Name);
+        if (!_app.IsReady)
+            SetStatus("○", "FaintBrush", "Sin nombre todavía");
+        else if (state.Status == LinkStatus.Online)
+            SetStatus("●", "OkBrush", state.Online == 1 ? "1 persona conectada" : $"{state.Online} personas conectadas");
+        else if (state.Status == LinkStatus.NoneOnline)
+            SetStatus("○", "FaintBrush", "Nadie conectado ahora");
+        else
+            SetStatus("○", "WarnBrush", "Buscando compañeros en la red…");
 
-        switch (state.Status)
-        {
-            case LinkStatus.Connected:
-                SetStatus("●", "OkBrush", "Conectado");
-                break;
-            case LinkStatus.Connecting:
-                SetStatus("○", "WarnBrush", "Conectando…");
-                break;
-            case LinkStatus.NotPaired:
-                SetStatus("○", "FaintBrush", "Sin vincular");
-                break;
-            default:
-                SetStatus("×", "ErrBrush", "Desconectado");
-                break;
-        }
-
+        StatusText.ToolTip = _app.IsReady ? $"Te ven como «{_app.Settings.FriendlyName}»" : null;
         StatusDetail.Text = state.Detail ?? "";
         StatusDetail.Visibility = string.IsNullOrEmpty(state.Detail) ? Visibility.Collapsed : Visibility.Visible;
-        SendButton.IsEnabled = peer != null;
+    }
+
+    // ------------------------------------------------------------------ destinatarios
+
+    private void RefreshRecipients()
+    {
+        // Cambiar la lista con el desplegable abierto lo cerraría: se actualiza al cerrarse.
+        if (RecipientCombo.IsDropDownOpen)
+        {
+            _recipientsDirty = true;
+            return;
+        }
+        _recipientsDirty = false;
+
+        var contacts = _app.IsReady ? _app.Link.Contacts.Where(c => !c.Blocked).ToList() : new List<ContactInfo>();
+        if (!_app.IsReady)
+        {
+            ShowRecipientMessage("Elegí tu nombre para empezar.", "Elegir nombre…");
+        }
+        else if (contacts.Count == 0)
+        {
+            ShowRecipientMessage("Todavía no apareció nadie en la red.", "¿No aparece nadie?");
+        }
+        else
+        {
+            RecipientCombo.Visibility = Visibility.Visible;
+            PeerLabel.Visibility = Visibility.Collapsed;
+            SetupButton.Visibility = Visibility.Collapsed;
+        }
+        SendButton.IsEnabled = contacts.Count > 0;
+
+        var options = new List<RecipientOption>();
+        if (contacts.Count > 1)
+        {
+            var online = contacts.Count(c => c.Status == ContactStatus.Online);
+            options.Add(new RecipientOption(AppSettings.AllRecipients, "Todos los conectados", "✱", Brush("AccentBrush"), $"({online})"));
+        }
+        foreach (var c in contacts)
+        {
+            options.Add(c.Status switch
+            {
+                ContactStatus.Online => new RecipientOption(c.Id, c.Name, "●", Brush("OkBrush"), null),
+                ContactStatus.Connecting => new RecipientOption(c.Id, c.Name, "○", Brush("WarnBrush"), "conectando…"),
+                _ => new RecipientOption(c.Id, c.Name, "○", Brush("FaintBrush"), "desconectado"),
+            });
+        }
+
+        var wanted = (RecipientCombo.SelectedItem as RecipientOption)?.Id ?? _app.Settings.LastRecipient;
+        _updatingRecipients = true;
+        try
+        {
+            RecipientCombo.ItemsSource = options;
+            RecipientCombo.SelectedItem =
+                options.FirstOrDefault(o => o.Id == wanted)
+                ?? (contacts.Count == 1 ? options.FirstOrDefault() : options.FirstOrDefault(o => o.Id == AppSettings.AllRecipients));
+        }
+        finally
+        {
+            _updatingRecipients = false;
+        }
+    }
+
+    private void ShowRecipientMessage(string text, string action)
+    {
+        RecipientCombo.Visibility = Visibility.Collapsed;
+        PeerLabel.Visibility = Visibility.Visible;
+        PeerLabel.Text = text;
+        SetupButton.Content = action;
+        SetupButton.Visibility = Visibility.Visible;
+    }
+
+    private Brush Brush(string key) => (Brush)FindResource(key);
+
+    private void RecipientCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_updatingRecipients || RecipientCombo.SelectedItem is not RecipientOption o) return;
+        _app.RememberRecipient(o.Id);
+    }
+
+    private void RecipientCombo_DropDownClosed(object? sender, EventArgs e)
+    {
+        if (_recipientsDirty) RefreshRecipients();
+        FocusInput();
+    }
+
+    private void MoveRecipient(int delta)
+    {
+        var count = RecipientCombo.Items.Count;
+        if (count < 2 || RecipientCombo.Visibility != Visibility.Visible) return;
+        var index = RecipientCombo.SelectedIndex < 0 ? 0 : RecipientCombo.SelectedIndex;
+        RecipientCombo.SelectedIndex = (index + delta + count) % count;
+    }
+
+    private void SetupButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_app.IsReady) _app.ShowWelcome();
+        else _app.ShowSettings(SettingsWindow.PeopleTab);
     }
 
     private void SetStatus(string symbol, string brushKey, string text)
@@ -128,26 +229,51 @@ public partial class MainWindow : Window
 
     private void OnDeliveryChanged(string id, DeliveryState state)
     {
-        if (id != _lastMessageId) return;
+        if (!_lastSend.ContainsKey(id)) return;
+        _lastSend[id] = state;
         var confirm = _app.Settings.ConfirmDelivery;
-        switch (state)
+
+        if (_lastSend.Count == 1)
         {
-            case DeliveryState.Queued:
-                ShowFeedback("En espera de conexión…", "MutedBrush", sticky: true);
-                break;
-            case DeliveryState.Sent:
-                ShowFeedback("Enviado", "MutedBrush", sticky: confirm);
-                break;
-            case DeliveryState.Delivered:
-                ShowFeedback(confirm ? "Entregado ✓" : "Enviado ✓", "OkBrush", sticky: false);
-                break;
-            case DeliveryState.Shown:
-                if (confirm) ShowFeedback("Visto ✓", "OkBrush", sticky: false);
-                break;
-            case DeliveryState.Failed:
-                ShowFeedback("No entregado", "ErrBrush", sticky: false);
-                break;
+            switch (state)
+            {
+                case DeliveryState.Queued:
+                    ShowFeedback("En espera de conexión…", "MutedBrush", sticky: true);
+                    break;
+                case DeliveryState.Sent:
+                    ShowFeedback("Enviado", "MutedBrush", sticky: confirm);
+                    break;
+                case DeliveryState.Delivered:
+                    ShowFeedback(confirm ? "Entregado ✓" : "Enviado ✓", "OkBrush", sticky: false);
+                    break;
+                case DeliveryState.Shown:
+                    if (confirm) ShowFeedback("Visto ✓", "OkBrush", sticky: false);
+                    break;
+                case DeliveryState.Failed:
+                    ShowFeedback("No entregado", "ErrBrush", sticky: false);
+                    break;
+            }
+            return;
         }
+
+        // Envío a varias personas: se resume ("Entregado a 3 de 4").
+        var total = _lastSend.Count;
+        var states = _lastSend.Values.ToList();
+        var shown = states.Count(s => s == DeliveryState.Shown);
+        var delivered = states.Count(s => s is DeliveryState.Delivered or DeliveryState.Shown);
+        var failed = states.Count(s => s == DeliveryState.Failed);
+        var settled = delivered + failed == total;
+        if (confirm && shown > 0)
+            ShowFeedback(shown == total ? "Visto por todos ✓" : $"Visto por {shown} de {total}", "OkBrush", sticky: shown < total && !settled);
+        else if (delivered > 0)
+            ShowFeedback(delivered == total ? (confirm ? "Entregado a todos ✓" : "Enviado ✓") : $"Entregado a {delivered} de {total}",
+                "OkBrush", sticky: !settled || (confirm && delivered == total));
+        else if (failed == total)
+            ShowFeedback("No entregado", "ErrBrush", sticky: false);
+        else if (states.Any(s => s == DeliveryState.Queued))
+            ShowFeedback("En espera de conexión…", "MutedBrush", sticky: true);
+        else
+            ShowFeedback("Enviado", "MutedBrush", sticky: confirm);
     }
 
     private void ShowFeedback(string text, string brushKey, bool sticky)
@@ -162,18 +288,25 @@ public partial class MainWindow : Window
 
     private void Send()
     {
-        var result = _app.SendMessage(Input.Text, UrgentToggle.IsChecked == true);
+        if (RecipientCombo.SelectedItem is not RecipientOption to)
+        {
+            if (_app.IsReady && !string.IsNullOrWhiteSpace(Input.Text)) ShowFeedback("Elegí a quién enviarlo", "ErrBrush", sticky: false);
+            return;
+        }
+        var result = _app.SendMessage(to.Id, Input.Text, UrgentToggle.IsChecked == true);
         if (!result.Accepted)
         {
             if (!string.IsNullOrWhiteSpace(Input.Text)) ShowFeedback(result.Error ?? "No se pudo enviar", "ErrBrush", sticky: false);
             return;
         }
-        _lastMessageId = result.MessageId;
+        _lastSend.Clear();
+        foreach (var id in result.MessageIds) _lastSend[id] = null;
+        _app.RememberRecipient(to.Id);
         Input.Clear();
         UrgentToggle.IsChecked = false;
-        if (_app.Link.State.Status == LinkStatus.Connected) ShowFeedback("Enviando…", "MutedBrush", sticky: true);
+        if (result.AnyOnline) ShowFeedback("Enviando…", "MutedBrush", sticky: true);
         FocusInput();
-        _app.AfterSend();
+        _app.AfterSend(result.AnyOnline);
     }
 
     private void Send_Click(object sender, RoutedEventArgs e) => Send();
@@ -195,6 +328,11 @@ public partial class MainWindow : Window
             e.Handled = true;
             UrgentToggle.IsChecked = UrgentToggle.IsChecked != true;
         }
+        else if (e.Key is Key.Up or Key.Down && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            MoveRecipient(e.Key == Key.Down ? 1 : -1);
+        }
     }
 
     private void Input_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -207,8 +345,6 @@ public partial class MainWindow : Window
     // ------------------------------------------------------------------ barra de título
 
     private void Settings_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
-
-    private void Pair_Click(object sender, RoutedEventArgs e) => _app.ShowPairing();
 
     private void Minimize_Click(object sender, RoutedEventArgs e)
     {

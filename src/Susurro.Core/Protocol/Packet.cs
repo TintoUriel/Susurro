@@ -12,9 +12,6 @@ public static class PacketType
     public const string Auth = "auth";          // prueba HMAC de quien marca
     public const string Reject = "reject";      // rechazo con motivo
 
-    // --- Vinculación (texto plano, protegida por ECDH + código) ---
-    public const string PairConfirm = "pairConfirm";
-
     // --- Sesión (cifrado AES-GCM) ---
     public const string Ok = "ok";              // primera trama cifrada: sesión aceptada
     public const string Message = "msg";
@@ -28,7 +25,6 @@ public static class PacketType
 public static class HelloMode
 {
     public const string Session = "session";
-    public const string Pair = "pair";
 }
 
 public static class AckState
@@ -40,11 +36,8 @@ public static class AckState
 public static class RejectReason
 {
     public const string Version = "version";
-    public const string Unknown = "unknown";          // instancia no vinculada
-    public const string Auth = "auth";                // prueba criptográfica inválida
-    public const string NotPairing = "notpairing";    // la otra PC no tiene un código activo
-    public const string BadCode = "code";             // código incorrecto
-    public const string TooManyAttempts = "attempts";
+    public const string Unknown = "unknown";          // no se aceptan conexiones de esta instancia (bloqueada)
+    public const string Auth = "auth";                // prueba criptográfica o clave pública inválida
     public const string Duplicate = "duplicate";      // ya existe una sesión preferida
     public const string Busy = "busy";
     public const string Self = "self";
@@ -66,6 +59,7 @@ public sealed class Packet
     public string? Boot { get; set; }
     public byte[]? Nonce { get; set; }
     public byte[]? Proof { get; set; }
+    /// <summary>Clave pública de identidad (SubjectPublicKeyInfo); su hash es el Id.</summary>
     public byte[]? Key { get; set; }
     public int? Port { get; set; }
     public long? Ts { get; set; }
@@ -95,14 +89,13 @@ public sealed class DiscoveryPacket
     public string Id { get; set; } = "";
     public string? Name { get; set; }
     public int Port { get; set; }
-    public bool Pairing { get; set; }
-    public bool Paired { get; set; }
     public string? Nonce { get; set; }
 }
 
 public static class ProtocolConstants
 {
-    public const int Version = 1;
+    /// <summary>2: identidad por clave pública, sin código de vinculación.</summary>
+    public const int Version = 2;
     /// <summary>Tamaño máximo de trama antes de autenticar (limita abuso desde la red).</summary>
     public const int MaxHandshakeFrame = 4 * 1024;
     /// <summary>Tamaño máximo de trama en sesión (un mensaje ocupa &lt; 2 KB).</summary>

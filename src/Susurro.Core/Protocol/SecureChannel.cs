@@ -6,7 +6,7 @@ namespace Susurro.Core.Protocol;
 
 /// <summary>
 /// Cifrado autenticado de la sesión (AES-256-GCM).
-/// - Una clave por dirección, derivada con HKDF de la clave de vínculo y de los nonces
+/// - Una clave por dirección, derivada con HKDF de la clave de enlace y de los nonces
 ///   aleatorios de ambos extremos (clave nueva en cada conexión).
 /// - El nonce de GCM es un contador implícito de 64 bits: una trama repetida, reordenada,
 ///   omitida o inyectada hace fallar la verificación y se cierra la sesión.
@@ -30,14 +30,14 @@ public sealed class SecureChannel : IDisposable
         CryptographicOperations.ZeroMemory(recvKey);
     }
 
-    public static SecureChannel Create(byte[] pairKey, bool isDialer, byte[] nonceDialer, byte[] nonceListener)
+    public static SecureChannel Create(byte[] linkKey, bool isDialer, byte[] nonceDialer, byte[] nonceListener)
     {
         var salt = new byte[nonceDialer.Length + nonceListener.Length];
         nonceDialer.CopyTo(salt, 0);
         nonceListener.CopyTo(salt, nonceDialer.Length);
 
-        var d2l = HKDF.DeriveKey(HashAlgorithmName.SHA256, pairKey, 32, salt, Encoding.ASCII.GetBytes("susurro/v1/session/d2l"));
-        var l2d = HKDF.DeriveKey(HashAlgorithmName.SHA256, pairKey, 32, salt, Encoding.ASCII.GetBytes("susurro/v1/session/l2d"));
+        var d2l = HKDF.DeriveKey(HashAlgorithmName.SHA256, linkKey, 32, salt, Encoding.ASCII.GetBytes("susurro/v2/session/d2l"));
+        var l2d = HKDF.DeriveKey(HashAlgorithmName.SHA256, linkKey, 32, salt, Encoding.ASCII.GetBytes("susurro/v2/session/l2d"));
         return isDialer ? new SecureChannel(d2l, l2d) : new SecureChannel(l2d, d2l);
     }
 

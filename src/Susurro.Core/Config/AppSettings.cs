@@ -59,31 +59,42 @@ public sealed class OverlaySettings
     public OverlaySettings Clone() => (OverlaySettings)MemberwiseClone();
 }
 
-public sealed class PeerSettings
+/// <summary>
+/// Otra persona con Susurro en la red. Se agrega sola la primera vez que se conectan
+/// (su identidad ya quedó verificada criptográficamente).
+/// </summary>
+public sealed class ContactSettings
 {
-    /// <summary>InstanceId persistente de la otra PC (no depende de su IP).</summary>
+    /// <summary>InstanceId de la otra instalación (hash de su clave pública; no depende de su IP).</summary>
     public string InstanceId { get; set; } = "";
     public string Name { get; set; } = "";
     /// <summary>Última dirección IPv4 donde se la encontró (solo una pista; siempre se revalida).</summary>
     public string? LastAddress { get; set; }
     public int LastPort { get; set; }
-    /// <summary>Dirección configurada a mano (IP, IP:puerto o nombre de equipo). Opcional.</summary>
+    /// <summary>Dirección agregada a mano (IP, IP:puerto o nombre de equipo). Opcional.</summary>
     public string? ManualAddress { get; set; }
-    /// <summary>Clave de vínculo (32 bytes) protegida con DPAPI del usuario actual, en base64.</summary>
-    public string ProtectedKey { get; set; } = "";
-    public DateTime PairedUtc { get; set; }
+    /// <summary>No se aceptan conexiones ni mensajes de esta persona.</summary>
+    public bool Blocked { get; set; }
+    public DateTime LastSeenUtc { get; set; }
 
-    public PeerSettings Clone() => (PeerSettings)MemberwiseClone();
+    public ContactSettings Clone() => (ContactSettings)MemberwiseClone();
 }
 
 public sealed class AppSettings
 {
-    public const int CurrentSchema = 1;
+    /// <summary>2: identidad por clave pública y contactos automáticos (antes: una PC vinculada con código).</summary>
+    public const int CurrentSchema = 2;
+    /// <summary>Valor de <see cref="LastRecipient"/> para "todos los conectados".</summary>
+    public const string AllRecipients = "*";
     public const int DefaultPort = 47810;
     public const int DefaultDiscoveryPort = 47811;
 
     public int SchemaVersion { get; set; } = CurrentSchema;
+    /// <summary>Se deriva de la clave de identidad al arrancar.</summary>
     public string InstanceId { get; set; } = "";
+    /// <summary>Clave privada de identidad protegida con DPAPI (base64).</summary>
+    public string? IdentityKey { get; set; }
+    /// <summary>Nombre de la persona (lo ven los demás). Vacío hasta la pantalla de bienvenida.</summary>
     public string FriendlyName { get; set; } = "";
     public int Port { get; set; } = DefaultPort;
     public int DiscoveryPort { get; set; } = DefaultDiscoveryPort;
@@ -107,13 +118,16 @@ public sealed class AppSettings
     public double? MainWindowLeft { get; set; }
     public double? MainWindowTop { get; set; }
 
-    public PeerSettings? Peer { get; set; }
+    /// <summary>InstanceId del último destinatario elegido, o <see cref="AllRecipients"/>.</summary>
+    public string? LastRecipient { get; set; }
+
+    public List<ContactSettings> Contacts { get; set; } = new();
     public OverlaySettings Overlay { get; set; } = new();
 
     public AppSettings Clone()
     {
         var copy = (AppSettings)MemberwiseClone();
-        copy.Peer = Peer?.Clone();
+        copy.Contacts = Contacts.Select(c => c.Clone()).ToList();
         copy.Overlay = Overlay.Clone();
         return copy;
     }

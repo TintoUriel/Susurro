@@ -12,15 +12,16 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
-    public void First_load_creates_defaults_with_instance_id_and_machine_name()
+    public void First_load_creates_defaults_without_using_the_machine_name()
     {
         var store = new SettingsStore(_dir);
         var s = store.Load("OFICINA-PC", out var existed);
         Assert.False(existed);
         Assert.True(SettingsValidator.IsValidInstanceId(s.InstanceId));
-        Assert.Equal("OFICINA-PC", s.FriendlyName);
+        Assert.Equal("", s.FriendlyName); // se pide el nombre de la persona en la bienvenida
+        Assert.False(s.SetupCompleted);
         Assert.Equal(AppSettings.DefaultPort, s.Port);
-        Assert.Null(s.Peer);
+        Assert.Empty(s.Contacts);
         Assert.True(s.StartWithWindows); // inicio con Windows activado por defecto
     }
 
@@ -36,7 +37,9 @@ public sealed class SettingsTests : IDisposable
         s.Overlay.ShowBackground = false;
         s.Overlay.TextOutline = true;
         s.Overlay.TextColor = SubtitleColor.Yellow;
-        s.Peer = new PeerSettings { InstanceId = SettingsValidator.NewInstanceId(), Name = "Oficina", ProtectedKey = "abc", LastAddress = "10.0.0.5", LastPort = 47810 };
+        s.SetupCompleted = true;
+        s.LastRecipient = AppSettings.AllRecipients;
+        s.Contacts.Add(new ContactSettings { InstanceId = SettingsValidator.NewInstanceId(), Name = "Oficina", LastAddress = "10.0.0.5", LastPort = 47810, Blocked = true });
         Assert.True(store.Save(s));
 
         var back = store.Load("PC", out var existed);
@@ -49,8 +52,12 @@ public sealed class SettingsTests : IDisposable
         Assert.False(back.Overlay.ShowBackground);
         Assert.True(back.Overlay.TextOutline);
         Assert.Equal(SubtitleColor.Yellow, back.Overlay.TextColor);
-        Assert.Equal("Oficina", back.Peer!.Name);
-        Assert.Equal("10.0.0.5", back.Peer.LastAddress);
+        Assert.True(back.SetupCompleted);
+        Assert.Equal(AppSettings.AllRecipients, back.LastRecipient);
+        var c = Assert.Single(back.Contacts);
+        Assert.Equal("Oficina", c.Name);
+        Assert.Equal("10.0.0.5", c.LastAddress);
+        Assert.True(c.Blocked);
         Assert.Contains("\"topRight\"", File.ReadAllText(store.FilePath), StringComparison.OrdinalIgnoreCase);
     }
 
@@ -90,14 +97,51 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
-    public void Invalid_peer_is_removed()
+    public void Invalid_and_repeated_contacts_are_removed()
     {
         var s = new AppSettings { InstanceId = SettingsValidator.NewInstanceId() };
-        s.Peer = new PeerSettings { InstanceId = s.InstanceId, ProtectedKey = "x" }; // se vinculó consigo misma
-        Assert.Null(SettingsValidator.Normalize(s, "PC").Peer);
+        var other = SettingsValidator.NewInstanceId();
+        s.Contacts.Add(new ContactSettings { InstanceId = s.InstanceId, Name = "Yo" });           // esta misma instancia
+        s.Contacts.Add(new ContactSettings { InstanceId = "no-valido", Name = "X" });
+        s.Contacts.Add(new ContactSettings { InstanceId = other, Name = "  " });
+        s.Contacts.Add(new ContactSettings { InstanceId = other.ToUpperInvariant(), Name = "Repetido" });
+        s.Contacts.Add(null!);
+        var c = Assert.Single(SettingsValidator.Normalize(s, "PC").Contacts);
+        Assert.Equal(other, c.InstanceId);
+        Assert.Equal("Sin nombre", c.Name);
+    }
 
-        s.Peer = new PeerSettings { InstanceId = SettingsValidator.NewInstanceId(), ProtectedKey = "" };
-        Assert.Null(SettingsValidator.Normalize(s, "PC").Peer);
+    [Fact]
+    public void Contact_list_is_capped_keeping_blocked_and_recent()
+    {
+        var list = Enumerable.Range(0, SettingsValidator.MaxContacts + 20)
+            .Select(i => new ContactSettings { InstanceId = SettingsValidator.NewInstanceId(), Name = "P" + i, LastSeenUtc = DateTime.UtcNow.AddMinutes(i) })
+            .ToList();
+        list[0].Blocked = true; // el más viejo, pero bloqueado: tiene que seguir bloqueado
+        var result = SettingsValidator.NormalizeContacts(list, SettingsValidator.NewInstanceId());
+        Assert.Equal(SettingsValidator.MaxContacts, result.Count);
+        Assert.Contains(result, c => c.Name == "P0");
+        Assert.DoesNotContain(result, c => c.Name == "P1");
+    }
+
+    [Fact]
+    public void Version_1_settings_ask_for_the_name_again()
+    {
+        Directory.CreateDirectory(_dir);
+        var store = new SettingsStore(_dir);
+        File.WriteAllText(store.FilePath,
+            "{ \"schemaVersion\": 1, \"friendlyName\": \"OFICINA-PC\", \"setupCompleted\": true, " +
+            "\"peer\": { \"instanceId\": \"0123456789abcdef0123456789abcdef\", \"name\": \"Otra\", \"protectedKey\": \"abc\" } }");
+        var s = store.Load("OFICINA-PC", out _);
+        Assert.Equal(AppSettings.CurrentSchema, s.SchemaVersion);
+        Assert.Equal("", s.FriendlyName);       // era el nombre del equipo: se descarta
+        Assert.False(s.SetupCompleted);
+        Assert.Empty(s.Contacts);
+
+        File.WriteAllText(store.FilePath, "{ \"schemaVersion\": 1, \"friendlyName\": \"Tinto\", \"setupCompleted\": true }");
+        s = store.Load("OFICINA-PC", out _);
+        Assert.Equal("Tinto", s.FriendlyName);  // un nombre elegido se ofrece de nuevo
+        Assert.False(s.SetupCompleted);
     }
 
     [Fact]
@@ -121,11 +165,13 @@ public sealed class SettingsTests : IDisposable
     [Fact]
     public void Clone_is_deep()
     {
-        var s = new AppSettings { Peer = new PeerSettings { Name = "A" } };
+        var s = new AppSettings { Contacts = { new ContactSettings { Name = "A" } } };
         var c = s.Clone();
-        c.Peer!.Name = "B";
+        c.Contacts[0].Name = "B";
+        c.Contacts.Add(new ContactSettings());
         c.Overlay.FontSize = 40;
-        Assert.Equal("A", s.Peer.Name);
+        Assert.Equal("A", s.Contacts[0].Name);
+        Assert.Single(s.Contacts);
         Assert.NotEqual(40, s.Overlay.FontSize);
     }
 }

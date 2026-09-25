@@ -4,7 +4,7 @@ using System.Text;
 namespace Susurro.Core.Protocol;
 
 /// <summary>
-/// Autenticación mutua desafío-respuesta con la clave de vínculo (HMAC-SHA256).
+/// Autenticación mutua desafío-respuesta con la clave de enlace (HMAC-SHA256).
 /// La clave nunca viaja por la red; cada lado demuestra que la conoce firmando
 /// los nonces aleatorios de ambos extremos y los identificadores de instancia.
 /// </summary>
@@ -17,15 +17,15 @@ public static class HandshakeCrypto
     public static string NewBootId() => Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
 
     /// <param name="role">'D' para quien marca, 'L' para quien escucha.</param>
-    public static byte[] SessionProof(byte[] pairKey, char role, string dialerId, string listenerId, byte[] nonceDialer, byte[] nonceListener)
+    public static byte[] SessionProof(byte[] linkKey, char role, string dialerId, string listenerId, byte[] nonceDialer, byte[] nonceListener)
     {
         var data = Concat(
-            Encoding.ASCII.GetBytes("susurro/v1/auth/" + role),
+            Encoding.ASCII.GetBytes("susurro/v2/auth/" + role),
             Encoding.UTF8.GetBytes(dialerId),
             Encoding.UTF8.GetBytes(listenerId),
             nonceDialer,
             nonceListener);
-        return HMACSHA256.HashData(pairKey, data);
+        return HMACSHA256.HashData(linkKey, data);
     }
 
     public static bool FixedTimeEquals(byte[]? expected, byte[]? actual) =>

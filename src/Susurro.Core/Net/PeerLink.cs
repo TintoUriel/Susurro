@@ -3,27 +3,39 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using Susurro.Core.Config;
 using Susurro.Core.Discovery;
+using Susurro.Core.Identity;
 using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
-using Susurro.Core.Pairing;
 using Susurro.Core.Protocol;
 
 namespace Susurro.Core.Net;
 
-public enum LinkStatus { NotPaired, Disconnected, Connecting, Connected }
+public enum LinkStatus
+{
+    /// <summary>Todavía no se encontró a nadie en la red.</summary>
+    NoContacts,
+    /// <summary>Hay personas conocidas, pero ninguna conectada ahora.</summary>
+    NoneOnline,
+    /// <summary>Al menos una persona conectada.</summary>
+    Online,
+}
 
-public sealed record LinkState(LinkStatus Status, string? PeerName, string? RemoteEndPoint, string? Detail);
+public sealed record LinkState(LinkStatus Status, int Online, int Known, string? Detail);
+
+public enum ContactStatus { Offline, Connecting, Online }
+
+public sealed record ContactInfo(string Id, string Name, ContactStatus Status, string? Address, string? Detail, bool Blocked);
 
 public sealed record SendResult(bool Accepted, string? MessageId, string? Error);
 
-public sealed record PairingResult(bool Success, string? Error, PeerSettings? Peer)
+public sealed record AddContactResult(bool Success, string? Error, ContactInfo? Contact)
 {
-    public static PairingResult Fail(string error) => new(false, error, null);
+    public static AddContactResult Fail(string error) => new(false, error, null);
 }
 
 public sealed class PeerLinkOptions
 {
-    public required string InstanceId { get; init; }
+    public required LocalIdentity Identity { get; init; }
     public required string LocalName { get; init; }
     public int Port { get; init; } = AppSettings.DefaultPort;
     public int DiscoveryPort { get; init; } = AppSettings.DefaultDiscoveryPort;
@@ -32,9 +44,16 @@ public sealed class PeerLinkOptions
     public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(8);
     public TimeSpan DiscoveryTimeout { get; init; } = TimeSpan.FromSeconds(2.5);
     public TimeSpan[]? BackoffSteps { get; init; }
+    /// <summary>
+    /// Tras perder la conexión con alguien (sin que avisara que se cerraba), se reintenta con espera
+    /// creciente durante este tiempo. Pasado ese plazo solo se reintenta ante un evento (anuncio,
+    /// cambio de red, mensaje en espera): con personas apagadas no hay tráfico periódico.
+    /// </summary>
+    public TimeSpan RetryWindow { get; init; } = TimeSpan.FromMinutes(15);
     public HeartbeatOptions Heartbeat { get; init; } = HeartbeatOptions.Default;
     /// <summary>Tiempo máximo que un mensaje espera en la bandeja de salida sin conexión.</summary>
     public TimeSpan OutboxTtl { get; init; } = TimeSpan.FromMinutes(2);
+    /// <summary>Mensajes en espera por destinatario.</summary>
     public int OutboxCapacity { get; init; } = 20;
     /// <summary>Mensajes recibidos con más antigüedad que esta (según el reloj del remitente corregido) se descartan.</summary>
     public TimeSpan StaleMessageAge { get; init; } = TimeSpan.FromMinutes(10);
@@ -42,24 +61,34 @@ public sealed class PeerLinkOptions
 }
 
 /// <summary>
-/// Núcleo de comunicación entre las dos PCs (P2P, sin servidor):
-///  - Escucha TCP para conexiones entrantes (sesión o vinculación).
-///  - Marca hacia la otra PC cuando no hay sesión, con espera creciente y descubrimiento UDP.
-///  - Autentica con la clave de vínculo, cifra con AES-GCM, arbitra conexiones duplicadas.
-///  - Bandeja de salida con reintento tras reconexión, confirmaciones y filtro de duplicados.
+/// Núcleo de comunicación con las demás PCs de la oficina (P2P, sin servidor):
+///  - Escucha TCP para conexiones entrantes y marca hacia las demás cuando hace falta.
+///  - Cualquier Susurro de la red se agrega solo como contacto al conectarse: la identidad se
+///    verifica con su clave pública (el id es su hash), sin códigos.
+///  - Autentica con la clave de enlace (ECDH de las identidades), cifra con AES-GCM y arbitra
+///    conexiones duplicadas por cada par de PCs.
+///  - Bandeja de salida por destinatario con reintento tras reconexión, confirmaciones y filtro
+///    de duplicados.
 /// Todos los eventos se disparan desde hilos del pool: la UI debe pasarlos a su dispatcher.
 /// </summary>
 public sealed class PeerLink : IAsyncDisposable
 {
-    private const int MaxPendingHandshakes = 4;
+    /// <summary>Saludos entrantes simultáneos (al arrancar, toda la oficina puede conectarse a la vez).</summary>
+    private const int MaxPendingHandshakes = 32;
+    /// <summary>Conexiones simultáneas con PCs nuevas; el resto espera su turno.</summary>
+    private const int MaxConcurrentProbes = 8;
+    /// <summary>Límite de PCs nuevas en cola (protege ante datagramas falsos en masa).</summary>
+    private const int MaxQueuedProbes = 64;
 
     private readonly PeerLinkOptions _opts;
-    private readonly IKeyProtector _protector;
+    private readonly LocalIdentity _identity;
     private readonly object _gate = new();
-    private readonly SemaphoreSlim _kick = new(0, 1);
-    private readonly SemaphoreSlim _flushLock = new(1, 1);
-    private readonly SemaphoreSlim _pairLock = new(1, 1);
-    private readonly DuplicateFilter _dupes = new(512);
+    private readonly Dictionary<string, Peer> _peers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> _linkKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _probing = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _probeSlots = new(MaxConcurrentProbes, MaxConcurrentProbes);
+    private readonly Dictionary<string, long> _probeFailed = new(StringComparer.Ordinal);
+    private readonly DuplicateFilter _dupes = new(1024);
     private readonly List<OutMsg> _outbox = new();
     private readonly Timer _outboxTimer;
     private readonly Timer _networkTimer;
@@ -67,35 +96,26 @@ public sealed class PeerLink : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
 
     private volatile string _localName;
-    private PeerSettings? _peer;
-    private byte[]? _peerKey;
-    private PeerSession? _session;
-    private PairingInvitation? _invitation;
-    private IPEndPoint? _hint;
     private long _seq;
     private int _pendingHandshakes;
-    private int _consecutiveFailures;
-    private bool _dialing;
-    private string? _dialDetail;
     private string? _listenerError;
-    private bool _peerRejectedUs;
-    private bool _firewallSuspect;
     private bool _started;
     private bool _stopped;
     private LinkState? _lastState;
-    private long _lastUnknownLog = -1_000_000;
+    private IReadOnlyList<ContactInfo> _lastContacts = Array.Empty<ContactInfo>();
+    private long _lastRejectLog = -1_000_000;
 
-    public PeerLink(PeerLinkOptions options, IKeyProtector protector)
+    public PeerLink(PeerLinkOptions options)
     {
         _opts = options;
-        _protector = protector;
-        _localName = options.LocalName;
+        _identity = options.Identity;
+        _localName = SettingsValidator.CleanName(options.LocalName);
         BootId = HandshakeCrypto.NewBootId();
         _outboxTimer = new Timer(_ => ExpireOutbox(), null, Timeout.Infinite, Timeout.Infinite);
         _networkTimer = new Timer(_ => OnNetworkSettled(), null, Timeout.Infinite, Timeout.Infinite);
         if (options.EnableDiscovery)
         {
-            _discovery = new DiscoveryService(options.InstanceId, options.DiscoveryPort, DescribeSelf);
+            _discovery = new DiscoveryService(_identity.Id, options.DiscoveryPort, DescribeSelf);
             _discovery.PeerSeen += OnPeerSeen;
         }
     }
@@ -103,115 +123,98 @@ public sealed class PeerLink : IAsyncDisposable
     // ------------------------------------------------------------------ eventos / estado
 
     public event Action<LinkState>? StateChanged;
+    /// <summary>Cambió la lista de contactos o el estado de alguno: releer <see cref="Contacts"/>.</summary>
+    public event Action? ContactsChanged;
+    /// <summary>Cambiaron datos que hay que guardar (contacto nuevo, nombre, dirección, bloqueo).</summary>
+    public event Action<IReadOnlyList<ContactSettings>>? ContactsSaved;
     public event Action<WhisperMessage>? MessageReceived;
     public event Action<string, DeliveryState>? DeliveryChanged;
-    /// <summary>Cambió el vínculo o datos de la otra PC (nombre, última IP): hay que persistirlo.</summary>
-    public event Action<PeerSettings?>? PeerChanged;
-    /// <summary>El código activo se cerró (usado, expirado o agotado).</summary>
-    public event Action? InvitationClosed;
 
-    public string InstanceId => _opts.InstanceId;
+    public string InstanceId => _identity.Id;
     public string BootId { get; }
     public int Port => _opts.Port;
     public string LocalName => _localName;
 
     public LinkState State => ComputeState();
 
-    public PeerSettings? Peer
+    /// <summary>Contactos: primero los conectados, luego por nombre.</summary>
+    public IReadOnlyList<ContactInfo> Contacts
     {
-        get { lock (_gate) return _peer?.Clone(); }
+        get { lock (_gate) return SnapshotContactsLocked(); }
     }
 
-    public PairingInvitation? ActiveInvitation
+    public ContactInfo? FindContact(string id)
     {
-        get { lock (_gate) return _invitation is { } i && i.IsValid(DateTime.UtcNow) ? i : null; }
+        lock (_gate) return _peers.TryGetValue(id, out var p) ? DescribeLocked(p) : null;
     }
 
     // ------------------------------------------------------------------ ciclo de vida
 
+    /// <summary>Carga los contactos guardados (antes de <see cref="Start"/>).</summary>
+    public void SetContacts(IEnumerable<ContactSettings> contacts)
+    {
+        lock (_gate)
+        {
+            foreach (var c in SettingsValidator.NormalizeContacts(contacts.Select(c => c.Clone()), _identity.Id))
+                if (!_peers.ContainsKey(c.InstanceId)) _peers[c.InstanceId] = new Peer(c);
+        }
+    }
+
     public void Start()
     {
+        List<Peer> peers;
         lock (_gate)
         {
             if (_started || _stopped) return;
             _started = true;
+            peers = _peers.Values.ToList();
         }
-        Log.Info("net", $"Iniciando: puerto TCP {_opts.Port}, descubrimiento UDP {(_discovery != null ? _opts.DiscoveryPort.ToString() : "desactivado")}");
+        Log.Info("net", $"Iniciando: puerto TCP {_opts.Port}, descubrimiento UDP {(_discovery != null ? _opts.DiscoveryPort.ToString() : "desactivado")}, {peers.Count} contacto(s)");
         _ = ListenLoopAsync(_cts.Token);
+        foreach (var p in peers) EnsureLoop(p);
+        foreach (var p in peers) p.Kick(); // un intento con la última dirección conocida
         if (_discovery != null)
         {
             _discovery.Start();
             _discovery.Announce();
+            _ = SweepAsync();
         }
-        _ = DialLoopAsync(_cts.Token);
         PublishState();
     }
 
     public async Task StopAsync()
     {
-        PeerSession? s;
+        List<PeerSession> sessions;
         lock (_gate)
         {
             if (_stopped) return;
             _stopped = true;
-            s = _session;
+            sessions = _peers.Values.Select(p => p.Session).OfType<PeerSession>().ToList();
         }
-        if (s != null)
+        await Task.WhenAll(sessions.Select(async s =>
         {
             try { await s.SendByeAsync("cierre").ConfigureAwait(false); } catch { }
-        }
+        })).ConfigureAwait(false);
         try { _cts.Cancel(); } catch { }
         _discovery?.Dispose();
         _outboxTimer.Dispose();
         _networkTimer.Dispose();
+        lock (_gate)
+        {
+            foreach (var k in _linkKeys.Values) CryptographicOperations.ZeroMemory(k);
+            _linkKeys.Clear();
+        }
         Log.Info("net", "Comunicación detenida");
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
-    /// <summary>Configura (o quita) la PC vinculada desde la configuración guardada.</summary>
-    public void SetPeer(PeerSettings? peer)
-    {
-        byte[]? key = null;
-        if (peer != null)
-        {
-            key = _protector.Unprotect(peer.ProtectedKey);
-            if (key is not { Length: 32 })
-            {
-                Log.Warn("pairing", "No se pudo recuperar la clave de vínculo (¿otro usuario de Windows o archivo copiado?). Hay que volver a vincular.");
-                peer = null;
-                key = null;
-                PeerChanged?.Invoke(null);
-            }
-        }
-        ReplacePeer(peer, key);
-    }
-
-    public void Unpair()
-    {
-        Log.Info("pairing", "Vínculo eliminado por el usuario");
-        ReplacePeer(null, null);
-        PeerChanged?.Invoke(null);
-    }
-
     public void UpdateLocalName(string name)
     {
         _localName = SettingsValidator.CleanName(name);
-        var s = ReadySession();
-        if (s != null) _ = s.SendAsync(new Packet { T = PacketType.Profile, Name = _localName });
-    }
-
-    public void UpdateManualAddress(string? address)
-    {
-        PeerSettings? copy;
-        lock (_gate)
-        {
-            if (_peer == null) return;
-            _peer.ManualAddress = string.IsNullOrWhiteSpace(address) ? null : address.Trim();
-            copy = _peer.Clone();
-        }
-        PeerChanged?.Invoke(copy);
-        Kick();
+        foreach (var s in ReadySessions())
+            _ = s.SendAsync(new Packet { T = PacketType.Profile, Name = _localName });
+        _discovery?.Announce();
     }
 
     /// <summary>Cambió la red local (IP, Wi-Fi, cable) o el equipo volvió de suspensión.</summary>
@@ -221,11 +224,18 @@ public sealed class PeerLink : IAsyncDisposable
         catch (ObjectDisposedException) { }
     }
 
-    /// <summary>Forzar un intento de conexión inmediato (p. ej. botón "Reconectar").</summary>
+    /// <summary>Forzar la búsqueda y un intento de conexión inmediato con todos (botón "Reconectar").</summary>
     public void ReconnectNow()
     {
-        lock (_gate) _consecutiveFailures = 0;
-        Kick();
+        List<Peer> peers;
+        lock (_gate)
+        {
+            peers = _peers.Values.Where(p => p.Session == null && !p.Contact.Blocked).ToList();
+            foreach (var p in peers) p.Failures = 0;
+        }
+        foreach (var p in peers) p.Kick();
+        _discovery?.Announce();
+        _ = SweepAsync();
     }
 
     private void OnNetworkSettled()
@@ -233,28 +243,134 @@ public sealed class PeerLink : IAsyncDisposable
         if (_cts.IsCancellationRequested) return;
         Log.Info("net", "Cambio de red detectado: " + NetworkInfo.DescribeLocalAddresses());
         _discovery?.Restart();
-        _discovery?.Announce();
-        ReadySession()?.Probe();
-        lock (_gate) _consecutiveFailures = 0;
-        Kick();
+        foreach (var s in ReadySessions()) s.Probe();
+        ReconnectNow();
+    }
+
+    // ------------------------------------------------------------------ contactos
+
+    public void SetBlocked(string id, bool blocked)
+    {
+        PeerSession? close = null;
+        lock (_gate)
+        {
+            if (!_peers.TryGetValue(id, out var p) || p.Contact.Blocked == blocked) return;
+            p.Contact.Blocked = blocked;
+            if (blocked)
+            {
+                close = p.Session;
+                p.Session = null;
+            }
+            p.Failures = 0;
+            Log.Info("contacts", $"{p.Contact.Name} {(blocked ? "bloqueado" : "desbloqueado")}");
+        }
+        close?.Close("bloqueado");
+        if (blocked) FailOutboxFor(id);
+        PersistContacts();
+        PublishState();
+        if (!blocked) KickPeer(id);
+    }
+
+    /// <summary>Quita a alguien de la lista. Si vuelve a aparecer en la red, se agrega de nuevo.</summary>
+    public void Forget(string id)
+    {
+        Peer? removed;
+        lock (_gate)
+        {
+            if (!_peers.Remove(id, out removed)) return;
+            removed.Removed = true;
+            _probeFailed[id] = Environment.TickCount64; // que el próximo anuncio no lo vuelva a agregar al instante
+        }
+        Log.Info("contacts", $"{removed.Contact.Name} quitado de la lista");
+        removed.Session?.Close("quitado de la lista");
+        removed.Kick(); // termina su bucle
+        FailOutboxFor(id);
+        PersistContacts();
+        PublishState();
+    }
+
+    /// <summary>
+    /// Conecta con una PC por su dirección (cuando el descubrimiento automático no funciona en la red).
+    /// <paramref name="address"/>: IP, IP:puerto o nombre de equipo. Se recuerda para reconectar.
+    /// </summary>
+    public async Task<AddContactResult> AddByAddressAsync(string address, CancellationToken ct)
+    {
+        if (!NetworkInfo.TryParseHostPort(address, AppSettings.DefaultPort, out var host, out var port))
+            return AddContactResult.Fail("Dirección inválida. Usá una IP (192.168.1.20), IP:puerto o el nombre del equipo.");
+
+        IPAddress[] ips;
+        try { ips = await NetworkInfo.ResolveIPv4Async(host, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch { ips = Array.Empty<IPAddress>(); }
+        if (ips.Length == 0) return AddContactResult.Fail($"No se encontró el equipo «{host}» en la red.");
+
+        var last = DialResult.Unreachable;
+        foreach (var ip in ips)
+        {
+            var (result, peerId) = await DialAsync(new IPEndPoint(ip, port), expectedId: null, ct).ConfigureAwait(false);
+            if (result is DialResult.Connected or DialResult.Duplicate && peerId != null)
+            {
+                ContactSettings? changed = null;
+                ContactInfo? info;
+                lock (_gate)
+                {
+                    if (_peers.TryGetValue(peerId, out var p))
+                    {
+                        p.Contact.ManualAddress = address.Trim();
+                        changed = p.Contact;
+                    }
+                    info = p != null ? DescribeLocked(p) : null;
+                }
+                if (changed != null) PersistContacts();
+                if (info != null) return new AddContactResult(true, null, info);
+            }
+            last = result;
+        }
+        return AddContactResult.Fail(last switch
+        {
+            DialResult.Self => "Esa dirección corresponde a este mismo Susurro.",
+            DialResult.RejectedUnknown => "Esa PC no acepta conexiones de esta PC.",
+            DialResult.Blocked => "Esa persona está bloqueada. Desbloqueala en la lista.",
+            DialResult.Version => "La otra PC tiene una versión incompatible de Susurro. Actualizá las dos.",
+            DialResult.AuthFailed => "La otra PC no pudo demostrar su identidad.",
+            DialResult.Unreachable or DialResult.Refused =>
+                $"No se pudo conectar con {address.Trim()}. Verificá que Susurro esté abierto allí y que el firewall permita el puerto {port}.",
+            _ => "No se pudo conectar.",
+        });
+    }
+
+    /// <summary>Busca a todos en la red y conecta con los que no lo estén.</summary>
+    public async Task SweepAsync()
+    {
+        if (_discovery == null) return;
+        try
+        {
+            var found = await _discovery.QueryAsync(TimeSpan.FromSeconds(3), null, _cts.Token).ConfigureAwait(false);
+            foreach (var d in found) OnPeerSeen(d);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Log.Warn("discovery", "Error buscando en la red", ex); }
     }
 
     // ------------------------------------------------------------------ envío de mensajes
 
-    public SendResult Send(string text, bool urgent, bool wantReceipt)
+    public SendResult Send(string recipientId, string text, bool urgent, bool wantReceipt)
     {
         if (!MessageRules.TryValidate(text, out var clean, out var error))
             return new SendResult(false, null, error);
 
         OutMsg msg;
         bool connected;
+        Peer? peer;
         lock (_gate)
         {
             if (_stopped) return new SendResult(false, null, "Susurro se está cerrando.");
-            if (_peer == null) return new SendResult(false, null, "No hay ninguna PC vinculada.");
-            if (_outbox.Count >= _opts.OutboxCapacity) return new SendResult(false, null, "Demasiados mensajes en espera.");
+            if (!_peers.TryGetValue(recipientId, out peer)) return new SendResult(false, null, "Esa persona ya no está en la lista.");
+            if (peer.Contact.Blocked) return new SendResult(false, null, $"{peer.Contact.Name} está bloqueado.");
+            if (_outbox.Count(m => m.RecipientId == recipientId) >= _opts.OutboxCapacity)
+                return new SendResult(false, null, "Demasiados mensajes en espera.");
             var id = MessageRules.NewMessageId();
-            msg = new OutMsg(id, new Packet
+            msg = new OutMsg(id, recipientId, new Packet
             {
                 T = PacketType.Message,
                 MsgId = id,
@@ -266,37 +382,39 @@ public sealed class PeerLink : IAsyncDisposable
                 Name = _localName,
             }, DateTime.UtcNow);
             _outbox.Add(msg);
-            connected = _session is { Ready: true, IsClosed: false };
+            connected = peer.Session is { Ready: true, IsClosed: false };
         }
 
         if (!connected)
         {
-            Log.Info("msg", $"Mensaje en espera (sin conexión) [{msg.Id[..8]}]");
+            Log.Info("msg", $"Mensaje en espera para {peer.Contact.Name} (sin conexión) [{msg.Id[..8]}]");
             DeliveryChanged?.Invoke(msg.Id, DeliveryState.Queued);
+            peer.Kick();
         }
         EnsureOutboxTimer();
-        _ = FlushOutboxAsync();
+        _ = FlushOutboxAsync(peer);
         return new SendResult(true, msg.Id, null);
     }
 
     /// <summary>El overlay mostró el mensaje: si el remitente lo pidió, se le avisa ("Visto").</summary>
     public void ReportShown(WhisperMessage message)
     {
-        if (message.IsTest || !message.WantsReceipt) return;
-        var s = ReadySession();
+        if (message.IsTest || !message.WantsReceipt || message.SenderId == null) return;
+        var s = ReadySession(message.SenderId);
         if (s != null) _ = s.SendAsync(new Packet { T = PacketType.Ack, MsgId = message.Id, State = AckState.Shown });
     }
 
-    private async Task FlushOutboxAsync()
+    private async Task FlushOutboxAsync(Peer peer)
     {
-        try { await _flushLock.WaitAsync(_cts.Token).ConfigureAwait(false); }
+        try { await peer.FlushLock.WaitAsync(_cts.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
+        catch (ObjectDisposedException) { return; }
         try
         {
-            var s = ReadySession();
+            var s = ReadySession(peer.Contact.InstanceId);
             if (s == null) return;
             List<OutMsg> pending;
-            lock (_gate) pending = _outbox.Where(m => m.SentOnSession == 0).ToList();
+            lock (_gate) pending = _outbox.Where(m => m.RecipientId == peer.Contact.InstanceId && m.SentOnSession == 0).ToList();
             foreach (var m in pending)
             {
                 if (!await s.SendAsync(m.Packet).ConfigureAwait(false)) break;
@@ -307,7 +425,7 @@ public sealed class PeerLink : IAsyncDisposable
                     if (stillQueued) m.SentOnSession = s.Number;
                 }
                 if (!stillQueued) continue;
-                Log.Info("msg", $"Mensaje enviado [{m.Id[..8]}] ({m.Packet.Text?.Length ?? 0} caracteres{(m.Packet.Urgent == true ? ", urgente" : "")})");
+                Log.Info("msg", $"Mensaje enviado a {peer.Contact.Name} [{m.Id[..8]}] ({m.Packet.Text?.Length ?? 0} caracteres{(m.Packet.Urgent == true ? ", urgente" : "")})");
                 DeliveryChanged?.Invoke(m.Id, DeliveryState.Sent);
             }
         }
@@ -317,7 +435,7 @@ public sealed class PeerLink : IAsyncDisposable
         }
         finally
         {
-            try { _flushLock.Release(); } catch { }
+            try { peer.FlushLock.Release(); } catch { }
         }
     }
 
@@ -327,21 +445,24 @@ public sealed class PeerLink : IAsyncDisposable
         catch (ObjectDisposedException) { }
     }
 
+    private void StopOutboxTimerIfEmpty()
+    {
+        bool empty;
+        lock (_gate) empty = _outbox.Count == 0;
+        if (!empty) return;
+        try { _outboxTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
+    }
+
     private void ExpireOutbox()
     {
         List<OutMsg> expired;
-        bool empty;
         lock (_gate)
         {
             var limit = DateTime.UtcNow - _opts.OutboxTtl;
             expired = _outbox.Where(m => m.CreatedUtc < limit).ToList();
             foreach (var m in expired) _outbox.Remove(m);
-            empty = _outbox.Count == 0;
         }
-        if (empty)
-        {
-            try { _outboxTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
-        }
+        StopOutboxTimerIfEmpty();
         foreach (var m in expired)
         {
             Log.Warn("msg", $"Mensaje no entregado: expiró sin conexión [{m.Id[..8]}]");
@@ -349,15 +470,16 @@ public sealed class PeerLink : IAsyncDisposable
         }
     }
 
-    private void FailWholeOutbox()
+    private void FailOutboxFor(string recipientId)
     {
-        List<OutMsg> all;
+        List<OutMsg> failed;
         lock (_gate)
         {
-            all = _outbox.ToList();
-            _outbox.Clear();
+            failed = _outbox.Where(m => m.RecipientId == recipientId).ToList();
+            _outbox.RemoveAll(m => m.RecipientId == recipientId);
         }
-        foreach (var m in all) DeliveryChanged?.Invoke(m.Id, DeliveryState.Failed);
+        StopOutboxTimerIfEmpty();
+        foreach (var m in failed) DeliveryChanged?.Invoke(m.Id, DeliveryState.Failed);
     }
 
     // ------------------------------------------------------------------ paquetes de sesión
@@ -370,7 +492,7 @@ public sealed class PeerLink : IAsyncDisposable
                 HandleIncomingMessage(session, p);
                 break;
             case PacketType.Ack:
-                HandleAck(p);
+                HandleAck(session, p);
                 break;
             case PacketType.Profile:
                 var name = SettingsValidator.CleanName(p.Name);
@@ -415,31 +537,24 @@ public sealed class PeerLink : IAsyncDisposable
 
         var sender = SettingsValidator.CleanName(p.Name);
         if (sender.Length == 0) sender = session.PeerName;
-        var message = new WhisperMessage(id, text, sender, sentAt, p.Urgent == true, p.Seq ?? 0, p.Receipt == true);
-        Log.Info("msg", $"Mensaje recibido [{id[..8]}] ({text.Length} caracteres{(message.Urgent ? ", urgente" : "")})");
+        else if (sender != session.PeerName) UpdatePeerInfo(session, sender);
+        var message = new WhisperMessage(id, text, sender, sentAt, p.Urgent == true, p.Seq ?? 0, p.Receipt == true, SenderId: session.PeerId);
+        Log.Info("msg", $"Mensaje recibido de {sender} [{id[..8]}] ({text.Length} caracteres{(message.Urgent ? ", urgente" : "")})");
         MessageReceived?.Invoke(message);
     }
 
-    private void HandleAck(Packet p)
+    private void HandleAck(PeerSession session, Packet p)
     {
         if (!MessageRules.IsValidMessageId(p.MsgId)) return;
         var id = p.MsgId!;
         if (p.State == AckState.Received)
         {
             bool removed;
-            bool empty;
-            lock (_gate)
-            {
-                removed = _outbox.RemoveAll(m => m.Id == id) > 0;
-                empty = _outbox.Count == 0;
-            }
-            if (empty)
-            {
-                try { _outboxTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
-            }
+            lock (_gate) removed = _outbox.RemoveAll(m => m.Id == id && m.RecipientId == session.PeerId) > 0;
+            StopOutboxTimerIfEmpty();
             if (removed)
             {
-                Log.Info("msg", $"Mensaje entregado [{id[..8]}]");
+                Log.Info("msg", $"Mensaje entregado a {session.PeerName} [{id[..8]}]");
                 DeliveryChanged?.Invoke(id, DeliveryState.Delivered);
             }
         }
@@ -451,45 +566,81 @@ public sealed class PeerLink : IAsyncDisposable
 
     // ------------------------------------------------------------------ gestión de sesiones
 
-    private PeerSession? ReadySession()
+    private PeerSession? ReadySession(string peerId)
     {
-        lock (_gate) return _session is { Ready: true, IsClosed: false } s ? s : null;
+        lock (_gate) return _peers.TryGetValue(peerId, out var p) && p.Session is { Ready: true, IsClosed: false } s ? s : null;
     }
 
-    private bool TryActivate(PeerSession session)
+    private List<PeerSession> ReadySessions()
+    {
+        lock (_gate) return _peers.Values.Select(p => p.Session).OfType<PeerSession>().Where(s => s is { Ready: true, IsClosed: false }).ToList();
+    }
+
+    private enum Activation { Activated, Duplicate, Refused }
+
+    /// <summary>
+    /// Registra una sesión ya autenticada. Si es de alguien nuevo, lo agrega a los contactos.
+    /// Si ya hay otra sesión con esa persona, decide cuál queda con <see cref="SessionArbiter"/>.
+    /// </summary>
+    private Activation TryActivate(PeerSession session)
     {
         PeerSession? replaced = null;
         PeerSession? probe = null;
+        Peer? created = null;
         lock (_gate)
         {
-            if (_stopped || _peer == null) return false;
-            if (_session != null && !_session.IsClosed)
+            if (_stopped) return Activation.Refused;
+            if (!_peers.TryGetValue(session.PeerId, out var p))
             {
-                if (!SessionArbiter.ShouldReplace(_session.DialerId, session.DialerId, _opts.InstanceId, _peer.InstanceId))
-                {
-                    probe = _session;
-                }
+                MakeRoomLocked();
+                p = new Peer(new ContactSettings { InstanceId = session.PeerId, Name = session.PeerName, LastSeenUtc = DateTime.UtcNow });
+                _peers[session.PeerId] = p;
+                _probeFailed.Remove(session.PeerId);
+                created = p;
+            }
+            if (p.Contact.Blocked) return Activation.Refused;
+            if (p.Session != null && !p.Session.IsClosed)
+            {
+                if (!SessionArbiter.ShouldReplace(p.Session.DialerId, session.DialerId, _identity.Id, session.PeerId))
+                    probe = p.Session;
                 else
-                {
-                    replaced = _session;
-                }
+                    replaced = p.Session;
             }
             if (probe == null)
             {
-                _session = session;
+                p.Session = session;
                 session.PacketReceived += OnSessionPacket;
                 session.Closed += OnSessionClosed;
             }
+        }
+        if (created != null)
+        {
+            Log.Info("contacts", $"Contacto nuevo: {session.PeerName} (id {session.PeerId[..8]}…, {session.Remote.Address})");
+            EnsureLoop(created);
         }
         if (probe != null)
         {
             // Nos quedamos con la conexión preferida, pero comprobamos que siga viva.
             probe.Probe();
-            return false;
+            return Activation.Duplicate;
         }
         replaced?.Close("reemplazada por una conexión más reciente");
         if (replaced != null) RequeueSentOn(replaced);
-        return true;
+        return Activation.Activated;
+    }
+
+    /// <summary>Con la lista llena, olvida al contacto desconectado visto hace más tiempo (nunca a un bloqueado).</summary>
+    private void MakeRoomLocked()
+    {
+        if (_peers.Count < SettingsValidator.MaxContacts) return;
+        var victim = _peers.Values
+            .Where(p => p.Session == null && !p.Contact.Blocked)
+            .OrderBy(p => p.Contact.LastSeenUtc)
+            .FirstOrDefault();
+        if (victim == null) return;
+        _peers.Remove(victim.Contact.InstanceId);
+        victim.Removed = true;
+        victim.Kick();
     }
 
     private void MarkReady(PeerSession session)
@@ -497,32 +648,44 @@ public sealed class PeerLink : IAsyncDisposable
         session.Ready = true;
         lock (_gate)
         {
-            _consecutiveFailures = 0;
-            _peerRejectedUs = false;
-            _firewallSuspect = false;
-            _dialDetail = null;
+            if (_peers.TryGetValue(session.PeerId, out var p) && ReferenceEquals(p.Session, session))
+            {
+                p.Failures = 0;
+                p.RejectedUs = false;
+                p.FirewallSuspect = false;
+                p.DialDetail = null;
+                p.LastOnlineTick = Environment.TickCount64;
+                p.Contact.LastSeenUtc = DateTime.UtcNow;
+            }
         }
-        UpdatePeerInfo(session, session.PeerName);
         Log.Info("net", $"Conectado con {session.PeerName} ({session.Remote.Address}, {(session.IsDialer ? "saliente" : "entrante")})");
+        UpdatePeerInfo(session, session.PeerName, forcePersist: true);
         PublishState();
-        _ = FlushOutboxAsync();
+        if (TryGetPeer(session.PeerId) is { } peer) _ = FlushOutboxAsync(peer);
     }
 
     private void OnSessionClosed(PeerSession session, string reason)
     {
         bool wasActive;
+        Peer? peer;
         lock (_gate)
         {
-            wasActive = ReferenceEquals(_session, session);
-            if (wasActive) _session = null;
+            wasActive = _peers.TryGetValue(session.PeerId, out peer) && ReferenceEquals(peer.Session, session);
+            if (wasActive)
+            {
+                peer!.Session = null;
+                // Si avisó que se cerraba, volverá a anunciarse al arrancar: no hace falta insistir.
+                if (session.ClosedByPeer) peer.LastOnlineTick = 0;
+                else if (session.Ready) peer.LastOnlineTick = Environment.TickCount64;
+            }
         }
         session.PacketReceived -= OnSessionPacket;
         session.Closed -= OnSessionClosed;
         RequeueSentOn(session);
         if (!wasActive) return;
-        if (session.Ready) Log.Info("net", "Desconectado: " + reason);
+        if (session.Ready) Log.Info("net", $"Desconectado de {session.PeerName}: {reason}");
         PublishState();
-        if (!_cts.IsCancellationRequested) Kick();
+        if (!_cts.IsCancellationRequested) peer!.Kick();
     }
 
     private void RequeueSentOn(PeerSession session)
@@ -534,49 +697,76 @@ public sealed class PeerLink : IAsyncDisposable
             foreach (var m in requeued) m.SentOnSession = 0;
         }
         foreach (var m in requeued) DeliveryChanged?.Invoke(m.Id, DeliveryState.Queued);
-        if (requeued.Count > 0) _ = FlushOutboxAsync();
+        if (requeued.Count > 0 && TryGetPeer(session.PeerId) is { } p)
+        {
+            p.Kick();
+            _ = FlushOutboxAsync(p);
+        }
     }
 
-    private void UpdatePeerInfo(PeerSession session, string peerName)
+    private void UpdatePeerInfo(PeerSession session, string peerName, bool forcePersist = false)
     {
-        PeerSettings? changed = null;
+        var changed = forcePersist;
         lock (_gate)
         {
-            if (_peer == null || !ReferenceEquals(_session, session)) return;
+            if (!_peers.TryGetValue(session.PeerId, out var p) || !ReferenceEquals(p.Session, session)) return;
+            var c = p.Contact;
             var address = session.Remote.Address.ToString();
             var port = session.IsDialer ? session.Remote.Port : session.PeerPort;
-            if (peerName.Length > 0 && _peer.Name != peerName) { _peer.Name = peerName; changed = _peer; }
-            if (_peer.LastAddress != address) { _peer.LastAddress = address; changed = _peer; }
-            if (port is > 0 and <= 65535 && _peer.LastPort != port) { _peer.LastPort = port; changed = _peer; }
-            session.PeerName = _peer.Name;
-            changed = changed?.Clone();
+            if (peerName.Length > 0 && c.Name != peerName) { c.Name = peerName; changed = true; }
+            if (c.LastAddress != address) { c.LastAddress = address; changed = true; }
+            if (port is > 0 and <= 65535 && c.LastPort != port) { c.LastPort = port; changed = true; }
+            session.PeerName = c.Name;
         }
-        if (changed != null)
-        {
-            PeerChanged?.Invoke(changed);
-            PublishState();
-        }
+        if (!changed) return;
+        PersistContacts();
+        PublishState();
     }
 
-    private void ReplacePeer(PeerSettings? peer, byte[]? key)
+    private Peer? TryGetPeer(string id)
     {
-        PeerSession? old;
+        lock (_gate) return _peers.TryGetValue(id, out var p) ? p : null;
+    }
+
+    private void KickPeer(string id) => TryGetPeer(id)?.Kick();
+
+    private void PersistContacts()
+    {
+        List<ContactSettings> copy;
+        lock (_gate) copy = _peers.Values.Select(p => p.Contact.Clone()).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        try { ContactsSaved?.Invoke(copy); }
+        catch (Exception ex) { Log.Error("contacts", "Error guardando contactos", ex); }
+    }
+
+    // ------------------------------------------------------------------ clave de enlace
+
+    /// <summary>Clave de enlace con otra instancia (se calcula una vez y queda en memoria).</summary>
+    private byte[] LinkKeyFor(string peerId, byte[] peerPublicKey)
+    {
         lock (_gate)
         {
-            old = _session;
-            _session = null;
-            _peer = peer?.Clone();
-            if (_peerKey != null) CryptographicOperations.ZeroMemory(_peerKey);
-            _peerKey = key;
-            _hint = null;
-            _peerRejectedUs = false;
-            _firewallSuspect = false;
-            _consecutiveFailures = 0;
+            if (_linkKeys.TryGetValue(peerId, out var cached)) return cached;
         }
-        old?.Close("cambio de vínculo");
-        FailWholeOutbox();
-        PublishState();
-        Kick();
+        var key = _identity.DeriveLinkKey(peerId, peerPublicKey); // lanza CryptographicException si la clave es inválida
+        lock (_gate)
+        {
+            if (_linkKeys.TryGetValue(peerId, out var cached))
+            {
+                CryptographicOperations.ZeroMemory(key);
+                return cached;
+            }
+            if (_linkKeys.Count >= SettingsValidator.MaxContacts * 2)
+            {
+                // Límite de memoria ante identidades falsas en masa: se descartan las que no son contactos.
+                foreach (var stale in _linkKeys.Keys.Where(k => !_peers.ContainsKey(k)).ToList())
+                {
+                    CryptographicOperations.ZeroMemory(_linkKeys[stale]);
+                    _linkKeys.Remove(stale);
+                }
+            }
+            _linkKeys[peerId] = key;
+            return key;
+        }
     }
 
     // ------------------------------------------------------------------ escucha (entrantes)
@@ -591,7 +781,7 @@ public sealed class PeerLink : IAsyncDisposable
             {
                 listener = new TcpListener(IPAddress.Any, _opts.Port);
                 listener.Server.ExclusiveAddressUse = true;
-                listener.Start(8);
+                listener.Start(16);
                 if (_listenerError != null) Log.Info("net", $"Puerto {_opts.Port} disponible nuevamente");
                 lock (_gate) _listenerError = null;
                 retryDelay = TimeSpan.FromSeconds(2);
@@ -668,23 +858,17 @@ public sealed class PeerLink : IAsyncDisposable
             if (hello.V != ProtocolConstants.Version)
             {
                 await SendPlainAsync(stream, Reject(RejectReason.Version), hs.Token).ConfigureAwait(false);
-                Log.Warn("net", $"Conexión de {remote.Address} con versión de protocolo incompatible ({hello.V})");
+                LogRejected($"Conexión de {remote.Address} con versión de protocolo incompatible ({hello.V})");
                 return;
             }
+            if (hello.Mode != HelloMode.Session) throw new ProtocolException("Modo desconocido");
             if (!SettingsValidator.IsValidInstanceId(hello.Id) || hello.Nonce is not { Length: HandshakeCrypto.NonceSize })
                 throw new ProtocolException("hello inválido");
-            if (hello.Id == _opts.InstanceId)
+            if (hello.Id == _identity.Id)
             {
                 await SendPlainAsync(stream, Reject(RejectReason.Self), hs.Token).ConfigureAwait(false);
                 return;
             }
-
-            if (hello.Mode == HelloMode.Pair)
-            {
-                await HostPairingAsync(stream, hello, remote, hs.Token).ConfigureAwait(false);
-                return;
-            }
-            if (hello.Mode != HelloMode.Session) throw new ProtocolException("Modo desconocido");
 
             handedOff = await AcceptSessionAsync(socket, stream, hello, remote, hs.Token).ConfigureAwait(false);
         }
@@ -694,7 +878,7 @@ public sealed class PeerLink : IAsyncDisposable
         }
         catch (ProtocolException ex)
         {
-            Log.Warn("net", $"Conexión inválida de {remote?.Address}: {ex.Message}");
+            LogRejected($"Conexión inválida de {remote?.Address}: {ex.Message}");
         }
         catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or EndOfStreamException)
         {
@@ -717,22 +901,26 @@ public sealed class PeerLink : IAsyncDisposable
 
     private async Task<bool> AcceptSessionAsync(Socket socket, NetworkStream stream, Packet hello, IPEndPoint remote, CancellationToken ct)
     {
-        PeerSettings? peer;
-        byte[]? key;
-        lock (_gate)
+        var peerId = hello.Id!;
+        // El id es el hash de la clave pública: nadie puede presentarse con el id de otro.
+        if (!LocalIdentity.Matches(peerId, hello.Key))
         {
-            peer = _peer;
-            key = _peerKey;
+            LogRejected($"Conexión rechazada de {remote.Address}: la clave no corresponde al id");
+            await SendPlainAsync(stream, Reject(RejectReason.Auth), ct).ConfigureAwait(false);
+            return false;
         }
-        if (peer == null || key == null || hello.Id != peer.InstanceId)
+        if (IsBlocked(peerId))
         {
-            var now = Environment.TickCount64;
-            if (now - Interlocked.Read(ref _lastUnknownLog) > 300_000)
-            {
-                Interlocked.Exchange(ref _lastUnknownLog, now);
-                Log.Warn("net", $"Conexión rechazada de {remote.Address}: instancia no vinculada");
-            }
+            LogRejected($"Conexión rechazada de {remote.Address}: persona bloqueada");
             await SendPlainAsync(stream, Reject(RejectReason.Unknown), ct).ConfigureAwait(false);
+            return false;
+        }
+
+        byte[] key;
+        try { key = LinkKeyFor(peerId, hello.Key!); }
+        catch (CryptographicException)
+        {
+            await SendPlainAsync(stream, Reject(RejectReason.Auth), ct).ConfigureAwait(false);
             return false;
         }
 
@@ -743,34 +931,40 @@ public sealed class PeerLink : IAsyncDisposable
             T = PacketType.Welcome,
             V = ProtocolConstants.Version,
             Mode = HelloMode.Session,
-            Id = _opts.InstanceId,
+            Id = _identity.Id,
             Name = _localName,
+            Key = _identity.PublicKey,
             Boot = BootId,
             Nonce = nonceL,
-            Proof = HandshakeCrypto.SessionProof(key, 'L', hello.Id!, _opts.InstanceId, nonceD, nonceL),
+            Proof = HandshakeCrypto.SessionProof(key, 'L', peerId, _identity.Id, nonceD, nonceL),
             Port = _opts.Port,
             Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         }, ct).ConfigureAwait(false);
 
         var auth = await ReadPlainAsync(stream, ct).ConfigureAwait(false);
-        var expected = HandshakeCrypto.SessionProof(key, 'D', hello.Id!, _opts.InstanceId, nonceD, nonceL);
+        var expected = HandshakeCrypto.SessionProof(key, 'D', peerId, _identity.Id, nonceD, nonceL);
         if (auth.T != PacketType.Auth || !HandshakeCrypto.FixedTimeEquals(expected, auth.Proof))
         {
-            Log.Warn("net", $"Autenticación fallida desde {remote.Address} (la clave de vínculo no coincide)");
+            LogRejected($"Autenticación fallida desde {remote.Address}");
             await SendPlainAsync(stream, Reject(RejectReason.Auth), ct).ConfigureAwait(false);
             return false;
         }
 
         var channel = SecureChannel.Create(key, isDialer: false, nonceD, nonceL);
         var offset = hello.Ts is long ts ? ts - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
-        var session = new PeerSession(socket, stream, channel, isDialer: false, dialerId: hello.Id!,
-            PeerDisplayName(hello.Name, peer), hello.Boot ?? "", remote, hello.Port ?? 0, offset, _opts.Heartbeat);
+        var session = new PeerSession(socket, stream, channel, isDialer: false, dialerId: peerId, peerId,
+            DisplayName(hello.Name, peerId), hello.Boot ?? "", remote, hello.Port ?? 0, offset, _opts.Heartbeat);
 
-        if (!TryActivate(session))
+        switch (TryActivate(session))
         {
-            await session.SendAsync(Reject(RejectReason.Duplicate)).ConfigureAwait(false);
-            session.Close("conexión duplicada");
-            return true;
+            case Activation.Duplicate:
+                await session.SendAsync(Reject(RejectReason.Duplicate)).ConfigureAwait(false);
+                session.Close("conexión duplicada");
+                return true;
+            case Activation.Refused:
+                await session.SendAsync(Reject(RejectReason.Unknown)).ConfigureAwait(false);
+                session.Close("rechazada");
+                return true;
         }
         if (!await session.SendAsync(new Packet { T = PacketType.Ok, Name = _localName }).ConfigureAwait(false))
             return true; // SendAsync ya cerró la sesión
@@ -779,59 +973,78 @@ public sealed class PeerLink : IAsyncDisposable
         return true;
     }
 
+    private bool IsBlocked(string id)
+    {
+        lock (_gate) return _peers.TryGetValue(id, out var p) && p.Contact.Blocked;
+    }
+
+    /// <summary>Registra rechazos como máximo uno cada 5 minutos (evita llenar el log desde la red).</summary>
+    private void LogRejected(string message)
+    {
+        var now = Environment.TickCount64;
+        if (now - Interlocked.Read(ref _lastRejectLog) <= 300_000) return;
+        Interlocked.Exchange(ref _lastRejectLog, now);
+        Log.Warn("net", message);
+    }
+
     // ------------------------------------------------------------------ marcado (salientes)
 
-    private enum DialResult { Connected, Unreachable, Refused, RejectedUnknown, Rejected, AuthFailed, WrongInstance, Duplicate, Error }
+    private enum DialResult { Connected, Duplicate, Unreachable, Refused, RejectedUnknown, Rejected, Version, AuthFailed, WrongInstance, Blocked, Self, Error }
 
-    private async Task DialLoopAsync(CancellationToken ct)
+    private void EnsureLoop(Peer p)
+    {
+        lock (_gate)
+        {
+            if (p.LoopStarted || !_started || _stopped) return;
+            p.LoopStarted = true;
+        }
+        _ = PeerLoopAsync(p, _cts.Token);
+    }
+
+    /// <summary>
+    /// Un bucle por contacto que duerme hasta que haya un motivo para conectar (arranque, anuncio de
+    /// la otra PC, cambio de red, mensaje en espera, conexión perdida). Sin motivo no hay tráfico.
+    /// </summary>
+    private async Task PeerLoopAsync(Peer p, CancellationToken ct)
     {
         var backoff = new Backoff(_opts.BackoffSteps);
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                PeerSettings? peer;
-                byte[]? key;
-                bool hasSession;
-                lock (_gate)
+                await p.KickSignal.WaitAsync(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
+                backoff.Reset();
+                while (!ct.IsCancellationRequested)
                 {
-                    peer = _peer?.Clone();
-                    key = _peerKey;
-                    hasSession = _session != null;
-                }
+                    lock (_gate)
+                    {
+                        if (p.Removed) return;
+                        if (p.Session != null || p.Contact.Blocked) break;
+                        p.Dialing = true;
+                    }
+                    PublishState();
+                    var connected = await TryConnectOnceAsync(p, ct).ConfigureAwait(false);
+                    bool hasSession;
+                    bool retry;
+                    lock (_gate)
+                    {
+                        p.Dialing = false;
+                        p.DialDetail = null;
+                        hasSession = p.Session != null;
+                        if (!connected && !hasSession) p.Failures++;
+                        retry = ShouldRetryLocked(p);
+                    }
+                    PublishState();
+                    if (connected || hasSession || !retry) break;
 
-                if (peer == null || key == null || hasSession)
-                {
-                    backoff.Reset();
-                    await _kick.WaitAsync(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
-                    continue;
-                }
-
-                lock (_gate) _dialing = true;
-                PublishState();
-                var connected = await TryConnectOnceAsync(peer, key, ct).ConfigureAwait(false);
-                lock (_gate)
-                {
-                    _dialing = false;
-                    _dialDetail = null;
-                    if (!connected && _session == null) _consecutiveFailures++;
-                    hasSession = _session != null;
-                }
-                PublishState();
-
-                if (connected || hasSession)
-                {
-                    backoff.Reset();
-                    continue;
-                }
-
-                var delay = backoff.Next();
-                if (backoff.Failures == 1 || backoff.Failures % 10 == 0)
-                    Log.Info("net", $"No se pudo conectar con {peer.Name} (intento {backoff.Failures}); próximo intento en {delay.TotalSeconds:0} s");
-                if (await _kick.WaitAsync(delay, ct).ConfigureAwait(false))
-                {
-                    // Despertado por un evento (anuncio, cambio de red): pequeña pausa para agrupar eventos.
-                    await Task.Delay(300, ct).ConfigureAwait(false);
+                    var delay = backoff.Next();
+                    if (backoff.Failures == 1 || backoff.Failures % 10 == 0)
+                        Log.Info("net", $"No se pudo conectar con {p.Contact.Name} (intento {backoff.Failures}); próximo intento en {delay.TotalSeconds:0} s");
+                    if (await p.KickSignal.WaitAsync(delay, ct).ConfigureAwait(false))
+                    {
+                        // Despertado por un evento (anuncio, cambio de red): pequeña pausa para agrupar eventos.
+                        await Task.Delay(300, ct).ConfigureAwait(false);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -841,79 +1054,100 @@ public sealed class PeerLink : IAsyncDisposable
             catch (Exception ex)
             {
                 Log.Error("net", "Error en el bucle de conexión", ex);
-                lock (_gate) _dialing = false;
+                lock (_gate) p.Dialing = false;
                 try { await Task.Delay(5000, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
             }
         }
     }
 
-    private async Task<bool> TryConnectOnceAsync(PeerSettings peer, byte[] key, CancellationToken ct)
+    /// <summary>Se sigue reintentando solo si hay mensajes esperando o si la conexión se perdió hace poco.</summary>
+    private bool ShouldRetryLocked(Peer p)
     {
+        if (p.Removed || p.Contact.Blocked) return false;
+        if (_outbox.Any(m => m.RecipientId == p.Contact.InstanceId)) return true;
+        return p.LastOnlineTick != 0 && Environment.TickCount64 - p.LastOnlineTick < _opts.RetryWindow.TotalMilliseconds;
+    }
+
+    private async Task<bool> TryConnectOnceAsync(Peer p, CancellationToken ct)
+    {
+        ContactSettings c;
+        IPEndPoint? hint;
+        bool pending;
+        lock (_gate)
+        {
+            c = p.Contact.Clone();
+            hint = p.Hint;
+            pending = _outbox.Any(m => m.RecipientId == c.InstanceId);
+        }
+
         var candidates = new List<IPEndPoint>();
         void Add(IPEndPoint ep)
         {
             if (!candidates.Contains(ep)) candidates.Add(ep);
         }
-
-        IPEndPoint? hint;
-        lock (_gate) hint = _hint;
         if (hint != null) Add(hint);
-        var defaultPort = peer.LastPort is > 0 and <= 65535 ? peer.LastPort : AppSettings.DefaultPort;
-        if (peer.LastAddress != null && IPAddress.TryParse(peer.LastAddress, out var last))
+        var defaultPort = c.LastPort is > 0 and <= 65535 ? c.LastPort : AppSettings.DefaultPort;
+        if (c.LastAddress != null && IPAddress.TryParse(c.LastAddress, out var last))
             Add(new IPEndPoint(last, defaultPort));
-        if (peer.ManualAddress != null && NetworkInfo.TryParseHostPort(peer.ManualAddress, defaultPort, out var host, out var mport))
+        if (c.ManualAddress != null && NetworkInfo.TryParseHostPort(c.ManualAddress, defaultPort, out var host, out var mport))
         {
-            foreach (var ip in await NetworkInfo.ResolveIPv4Async(host, ct).ConfigureAwait(false))
-                Add(new IPEndPoint(ip, mport));
+            try
+            {
+                foreach (var ip in await NetworkInfo.ResolveIPv4Async(host, ct).ConfigureAwait(false))
+                    Add(new IPEndPoint(ip, mport));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
 
         var tried = new Dictionary<IPEndPoint, DialResult>();
         foreach (var ep in candidates)
         {
-            var r = await DialAsync(ep, peer, key, ct).ConfigureAwait(false);
-            if (r == DialResult.Connected) return true;
+            var (r, _) = await DialAsync(ep, c.InstanceId, ct).ConfigureAwait(false);
+            if (r is DialResult.Connected or DialResult.Duplicate) return true;
             tried[ep] = r;
-            if (IsSessionActive()) return true;
+            if (HasSession(p)) return true;
         }
 
-        if (_discovery == null) return false;
+        // Buscar por la red solo si hay algo que entregar: el resto se reconecta cuando la otra PC se anuncia.
+        if (_discovery == null || !pending) return false;
 
-        lock (_gate) _dialDetail = "Buscando en la red…";
+        lock (_gate) p.DialDetail = "Buscando en la red…";
         PublishState();
-        var found = await _discovery.QueryAsync(_opts.DiscoveryTimeout, peer.InstanceId, ct).ConfigureAwait(false);
-        var match = found.FirstOrDefault(f => f.InstanceId == peer.InstanceId);
+        var found = await _discovery.QueryAsync(_opts.DiscoveryTimeout, c.InstanceId, ct).ConfigureAwait(false);
+        var match = found.FirstOrDefault(f => f.InstanceId == c.InstanceId);
         if (match == null)
         {
-            lock (_gate) _firewallSuspect = false;
+            lock (_gate) p.FirewallSuspect = false;
             return false;
         }
 
-        lock (_gate) _hint = match.EndPoint;
-        if (IsSessionActive()) return true;
+        lock (_gate) p.Hint = match.EndPoint;
+        if (HasSession(p)) return true;
         var result = tried.TryGetValue(match.EndPoint, out var previous)
             ? previous
-            : await DialAsync(match.EndPoint, peer, key, ct).ConfigureAwait(false);
-        if (result == DialResult.Connected) return true;
+            : (await DialAsync(match.EndPoint, c.InstanceId, ct).ConfigureAwait(false)).Result;
+        if (result is DialResult.Connected or DialResult.Duplicate) return true;
 
         // Responde por UDP pero no se puede abrir la conexión TCP: casi siempre es el firewall.
         var suspect = result is DialResult.Unreachable or DialResult.Refused;
         bool changed;
         lock (_gate)
         {
-            changed = _firewallSuspect != suspect;
-            _firewallSuspect = suspect;
+            changed = p.FirewallSuspect != suspect;
+            p.FirewallSuspect = suspect;
         }
         if (suspect && changed)
-            Log.Warn("net", $"{peer.Name} responde en {match.Address} pero el puerto TCP {match.Port} no es accesible (¿firewall?)");
+            Log.Warn("net", $"{c.Name} responde en {match.Address} pero el puerto TCP {match.Port} no es accesible (¿firewall?)");
         return false;
     }
 
-    private bool IsSessionActive()
+    private bool HasSession(Peer p)
     {
-        lock (_gate) return _session is { IsClosed: false };
+        lock (_gate) return p.Session is { IsClosed: false };
     }
 
-    private async Task<DialResult> DialAsync(IPEndPoint ep, PeerSettings peer, byte[] key, CancellationToken ct)
+    /// <param name="expectedId">Id de quien se espera encontrar; null = aceptar a cualquiera (dirección manual).</param>
+    private async Task<(DialResult Result, string? PeerId)> DialAsync(IPEndPoint ep, string? expectedId, CancellationToken ct)
     {
         var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         var handedOff = false;
@@ -927,11 +1161,11 @@ public sealed class PeerLink : IAsyncDisposable
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                return DialResult.Unreachable;
+                return (DialResult.Unreachable, null);
             }
             catch (SocketException se)
             {
-                return se.SocketErrorCode == SocketError.ConnectionRefused ? DialResult.Refused : DialResult.Unreachable;
+                return (se.SocketErrorCode == SocketError.ConnectionRefused ? DialResult.Refused : DialResult.Unreachable, null);
             }
 
             cts.CancelAfter(_opts.HandshakeTimeout);
@@ -942,8 +1176,9 @@ public sealed class PeerLink : IAsyncDisposable
                 T = PacketType.Hello,
                 V = ProtocolConstants.Version,
                 Mode = HelloMode.Session,
-                Id = _opts.InstanceId,
+                Id = _identity.Id,
                 Name = _localName,
+                Key = _identity.PublicKey,
                 Boot = BootId,
                 Nonce = nonceD,
                 Port = _opts.Port,
@@ -953,35 +1188,58 @@ public sealed class PeerLink : IAsyncDisposable
             var welcome = await ReadPlainAsync(stream, cts.Token).ConfigureAwait(false);
             if (welcome.T == PacketType.Reject)
             {
-                if (welcome.Reason == RejectReason.Unknown)
+                switch (welcome.Reason)
                 {
-                    bool firstTime;
-                    lock (_gate)
-                    {
-                        firstTime = !_peerRejectedUs;
-                        _peerRejectedUs = true;
-                    }
-                    if (firstTime) Log.Warn("pairing", $"{peer.Name} ({ep.Address}) no reconoce este vínculo: hay que volver a vincular");
-                    return DialResult.RejectedUnknown;
+                    case RejectReason.Unknown:
+                        if (expectedId != null && TryGetPeer(expectedId) is { } rp)
+                        {
+                            bool firstTime;
+                            lock (_gate)
+                            {
+                                firstTime = !rp.RejectedUs;
+                                rp.RejectedUs = true;
+                            }
+                            if (firstTime) Log.Warn("net", $"{rp.Contact.Name} ({ep.Address}) no acepta conexiones de esta PC");
+                        }
+                        return (DialResult.RejectedUnknown, null);
+                    case RejectReason.Version:
+                        return (DialResult.Version, null);
+                    case RejectReason.Self:
+                        return (DialResult.Self, null);
+                    default:
+                        return (DialResult.Rejected, null);
                 }
-                return DialResult.Rejected;
             }
-            if (welcome.T != PacketType.Welcome || welcome.Id != peer.InstanceId)
-                return DialResult.WrongInstance; // en esa IP ahora hay otra cosa
-            if (welcome.V != ProtocolConstants.Version || welcome.Nonce is not { Length: HandshakeCrypto.NonceSize })
-                return DialResult.Rejected;
+            if (welcome.T != PacketType.Welcome || !SettingsValidator.IsValidInstanceId(welcome.Id))
+                return (DialResult.Error, null);
+            var peerId = welcome.Id!;
+            if (peerId == _identity.Id) return (DialResult.Self, null);
+            if (expectedId != null && peerId != expectedId)
+                return (DialResult.WrongInstance, null); // en esa IP ahora hay otra persona
+            if (welcome.V != ProtocolConstants.Version) return (DialResult.Version, null);
+            if (welcome.Nonce is not { Length: HandshakeCrypto.NonceSize }) return (DialResult.Error, null);
+            if (!LocalIdentity.Matches(peerId, welcome.Key))
+            {
+                Log.Warn("net", $"{ep.Address} presentó una clave que no corresponde a su id; se ignora");
+                return (DialResult.AuthFailed, null);
+            }
+            if (IsBlocked(peerId)) return (DialResult.Blocked, peerId);
 
-            var expected = HandshakeCrypto.SessionProof(key, 'L', _opts.InstanceId, peer.InstanceId, nonceD, welcome.Nonce);
+            byte[] key;
+            try { key = LinkKeyFor(peerId, welcome.Key!); }
+            catch (CryptographicException) { return (DialResult.AuthFailed, null); }
+
+            var expected = HandshakeCrypto.SessionProof(key, 'L', _identity.Id, peerId, nonceD, welcome.Nonce);
             if (!HandshakeCrypto.FixedTimeEquals(expected, welcome.Proof))
             {
-                Log.Warn("net", $"{ep.Address} dice ser {peer.Name} pero no demuestra la clave de vínculo; se ignora");
-                return DialResult.AuthFailed;
+                Log.Warn("net", $"{ep.Address} no demostró su identidad; se ignora");
+                return (DialResult.AuthFailed, null);
             }
 
             await SendPlainAsync(stream, new Packet
             {
                 T = PacketType.Auth,
-                Proof = HandshakeCrypto.SessionProof(key, 'D', _opts.InstanceId, peer.InstanceId, nonceD, welcome.Nonce),
+                Proof = HandshakeCrypto.SessionProof(key, 'D', _identity.Id, peerId, nonceD, welcome.Nonce),
             }, cts.Token).ConfigureAwait(false);
 
             var channel = SecureChannel.Create(key, isDialer: true, nonceD, welcome.Nonce);
@@ -995,35 +1253,41 @@ public sealed class PeerLink : IAsyncDisposable
             catch (Exception ex) when (ex is CryptographicException or ProtocolException)
             {
                 channel.Dispose();
-                Log.Warn("net", $"{peer.Name} rechazó la autenticación");
-                return DialResult.AuthFailed;
+                Log.Warn("net", $"{ep.Address} rechazó la autenticación");
+                return (DialResult.AuthFailed, null);
             }
             if (first.T != PacketType.Ok)
             {
                 channel.Dispose();
-                return first.T == PacketType.Reject && first.Reason == RejectReason.Duplicate ? DialResult.Duplicate : DialResult.Rejected;
+                return first.T == PacketType.Reject && first.Reason == RejectReason.Duplicate
+                    ? (DialResult.Duplicate, peerId)
+                    : (DialResult.Rejected, null);
             }
 
             var offset = welcome.Ts is long ts ? ts - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
-            var session = new PeerSession(socket, stream, channel, isDialer: true, dialerId: _opts.InstanceId,
-                PeerDisplayName(welcome.Name, peer), welcome.Boot ?? "", ep, welcome.Port ?? ep.Port, offset, _opts.Heartbeat);
+            var session = new PeerSession(socket, stream, channel, isDialer: true, dialerId: _identity.Id, peerId,
+                DisplayName(welcome.Name, peerId), welcome.Boot ?? "", ep, welcome.Port ?? ep.Port, offset, _opts.Heartbeat);
             handedOff = true;
-            if (!TryActivate(session))
+            switch (TryActivate(session))
             {
-                session.Close("conexión duplicada");
-                return DialResult.Duplicate;
+                case Activation.Duplicate:
+                    session.Close("conexión duplicada");
+                    return (DialResult.Duplicate, peerId);
+                case Activation.Refused:
+                    session.Close("rechazada");
+                    return (DialResult.Blocked, peerId);
             }
             session.Start();
             MarkReady(session);
-            return DialResult.Connected;
+            return (DialResult.Connected, peerId);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return DialResult.Unreachable;
+            return (DialResult.Unreachable, null);
         }
         catch (Exception ex) when (ex is ProtocolException or IOException or SocketException or EndOfStreamException or ObjectDisposedException)
         {
-            return DialResult.Error;
+            return (DialResult.Error, null);
         }
         finally
         {
@@ -1034,340 +1298,147 @@ public sealed class PeerLink : IAsyncDisposable
         }
     }
 
-    private static string PeerDisplayName(string? announced, PeerSettings peer)
+    private string DisplayName(string? announced, string peerId)
     {
         var n = SettingsValidator.CleanName(announced);
-        return n.Length > 0 ? n : peer.Name;
+        if (n.Length > 0) return n;
+        lock (_gate) return _peers.TryGetValue(peerId, out var p) ? p.Contact.Name : "Sin nombre";
     }
-
-    // ------------------------------------------------------------------ vinculación
-
-    /// <summary>Genera un código y acepta una vinculación entrante durante 5 minutos.</summary>
-    public PairingInvitation OpenPairing(TimeSpan? lifetime = null)
-    {
-        var inv = PairingInvitation.Create(lifetime);
-        lock (_gate) _invitation = inv;
-        Log.Info("pairing", "Código de vinculación generado (válido 5 minutos)");
-        _discovery?.Announce();
-        PublishState();
-        return inv;
-    }
-
-    public void CancelPairing()
-    {
-        lock (_gate) _invitation = null;
-        PublishState();
-    }
-
-    private async Task HostPairingAsync(NetworkStream stream, Packet hello, IPEndPoint remote, CancellationToken ct)
-    {
-        PairingInvitation? inv;
-        lock (_gate) inv = _invitation;
-        if (inv == null || !inv.IsValid(DateTime.UtcNow))
-        {
-            await SendPlainAsync(stream, Reject(RejectReason.NotPairing), ct).ConfigureAwait(false);
-            return;
-        }
-        if (!await _pairLock.WaitAsync(0, ct).ConfigureAwait(false))
-        {
-            await SendPlainAsync(stream, Reject(RejectReason.Busy), ct).ConfigureAwait(false);
-            return;
-        }
-        try
-        {
-            if (hello.Key is not { Length: > 0 and < 512 }) throw new ProtocolException("Clave pública inválida");
-            using var kx = new PairingKeyExchange();
-            var nonceH = HandshakeCrypto.NewNonce();
-            var hostKey = kx.PublicKey;
-            await SendPlainAsync(stream, new Packet
-            {
-                T = PacketType.Welcome,
-                V = ProtocolConstants.Version,
-                Mode = HelloMode.Pair,
-                Id = _opts.InstanceId,
-                Name = _localName,
-                Key = hostKey,
-                Nonce = nonceH,
-                Port = _opts.Port,
-            }, ct).ConfigureAwait(false);
-
-            var confirm = await ReadPlainAsync(stream, ct).ConfigureAwait(false);
-            if (confirm.T != PacketType.PairConfirm) throw new ProtocolException("Se esperaba pairConfirm");
-
-            byte[] shared;
-            try { shared = kx.DeriveShared(hello.Key); }
-            catch (CryptographicException) { throw new ProtocolException("Clave pública inválida"); }
-
-            var transcript = PairingCrypto.Transcript(hello.Id!, _opts.InstanceId, hello.Key, hostKey, hello.Nonce!, nonceH);
-            var confirmKey = PairingCrypto.ConfirmKey(inv.Code, transcript);
-            if (!HandshakeCrypto.FixedTimeEquals(PairingCrypto.ConfirmProof(confirmKey, 'J', transcript, shared), confirm.Proof))
-            {
-                var exhausted = inv.RegisterFailure();
-                Log.Warn("pairing", $"Código incorrecto desde {remote.Address} (intento {inv.Failures}/{PairingInvitation.MaxFailures})");
-                if (exhausted)
-                {
-                    lock (_gate) if (ReferenceEquals(_invitation, inv)) _invitation = null;
-                    Log.Warn("pairing", "Código invalidado por demasiados intentos fallidos");
-                    InvitationClosed?.Invoke();
-                    PublishState();
-                }
-                await SendPlainAsync(stream, Reject(exhausted ? RejectReason.TooManyAttempts : RejectReason.BadCode), ct).ConfigureAwait(false);
-                return;
-            }
-
-            await SendPlainAsync(stream, new Packet
-            {
-                T = PacketType.PairConfirm,
-                Proof = PairingCrypto.ConfirmProof(confirmKey, 'H', transcript, shared),
-            }, ct).ConfigureAwait(false);
-
-            var pairKey = PairingCrypto.PairKey(shared, transcript, inv.Code);
-            CryptographicOperations.ZeroMemory(shared);
-            var newPeer = new PeerSettings
-            {
-                InstanceId = hello.Id!,
-                Name = PeerDisplayName(hello.Name, new PeerSettings { Name = "PC remota" }),
-                LastAddress = remote.Address.ToString(),
-                LastPort = hello.Port is > 0 and <= 65535 ? hello.Port.Value : 0,
-                ProtectedKey = _protector.Protect(pairKey),
-                PairedUtc = DateTime.UtcNow,
-            };
-            lock (_gate) if (ReferenceEquals(_invitation, inv)) _invitation = null;
-            CompletePairing(newPeer, pairKey);
-            InvitationClosed?.Invoke();
-
-            // Esperar a que la otra PC lea la confirmación y cierre (evita un RST que la descarte).
-            try
-            {
-                using var linger = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                linger.CancelAfter(2000);
-                await stream.ReadAsync(new byte[1], linger.Token).ConfigureAwait(false);
-            }
-            catch { }
-        }
-        finally
-        {
-            _pairLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Vincula con la PC que está mostrando un código.
-    /// <paramref name="address"/>: IP, IP:puerto o nombre de equipo.
-    /// </summary>
-    public async Task<PairingResult> JoinAsync(string address, string code, bool rememberAddress, CancellationToken ct)
-    {
-        var normalized = PairingCode.Normalize(code);
-        if (normalized == null) return PairingResult.Fail("El código debe tener 8 caracteres (por ejemplo K7QM-4XPD).");
-        if (!NetworkInfo.TryParseHostPort(address, AppSettings.DefaultPort, out var host, out var port))
-            return PairingResult.Fail("Dirección inválida. Usá una IP (192.168.1.20), IP:puerto o el nombre del equipo.");
-
-        IPAddress[] ips;
-        try { ips = await NetworkInfo.ResolveIPv4Async(host, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch { ips = Array.Empty<IPAddress>(); }
-        if (ips.Length == 0) return PairingResult.Fail($"No se encontró el equipo «{host}» en la red.");
-
-        var last = PairingResult.Fail("No se pudo conectar.");
-        foreach (var ip in ips)
-        {
-            var (result, connected) = await JoinEndpointAsync(new IPEndPoint(ip, port), normalized, rememberAddress ? address.Trim() : null, ct).ConfigureAwait(false);
-            if (result.Success || connected) return result;
-            last = result;
-        }
-        return last;
-    }
-
-    /// <returns>El resultado y si se llegó a establecer la conexión TCP (para probar la siguiente IP si no).</returns>
-    private async Task<(PairingResult Result, bool Connected)> JoinEndpointAsync(IPEndPoint ep, string code, string? manualAddress, CancellationToken ct)
-    {
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(5));
-        try
-        {
-            await socket.ConnectAsync(ep, cts.Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is SocketException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-        {
-            return (PairingResult.Fail($"No se pudo conectar con {ep}. Verificá que Susurro esté abierto en la otra PC y que el firewall permita el puerto {ep.Port}."), false);
-        }
-        return (await PairOverSocketAsync(socket, ep, code, manualAddress, cts, ct).ConfigureAwait(false), true);
-    }
-
-    private async Task<PairingResult> PairOverSocketAsync(Socket socket, IPEndPoint ep, string code, string? manualAddress, CancellationTokenSource cts, CancellationToken ct)
-    {
-        try
-        {
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
-            await using var stream = new NetworkStream(socket, ownsSocket: false);
-            using var kx = new PairingKeyExchange();
-            var nonceJ = HandshakeCrypto.NewNonce();
-            var joinerKey = kx.PublicKey;
-            await SendPlainAsync(stream, new Packet
-            {
-                T = PacketType.Hello,
-                V = ProtocolConstants.Version,
-                Mode = HelloMode.Pair,
-                Id = _opts.InstanceId,
-                Name = _localName,
-                Key = joinerKey,
-                Nonce = nonceJ,
-                Port = _opts.Port,
-            }, cts.Token).ConfigureAwait(false);
-
-            var welcome = await ReadPlainAsync(stream, cts.Token).ConfigureAwait(false);
-            if (welcome.T == PacketType.Reject) return PairingResult.Fail(DescribeReject(welcome.Reason));
-            if (welcome.T != PacketType.Welcome || welcome.Mode != HelloMode.Pair || !SettingsValidator.IsValidInstanceId(welcome.Id)
-                || welcome.Key is not { Length: > 0 and < 512 } || welcome.Nonce is not { Length: HandshakeCrypto.NonceSize })
-                return PairingResult.Fail("Respuesta inesperada de la otra PC.");
-            if (welcome.Id == _opts.InstanceId) return PairingResult.Fail(DescribeReject(RejectReason.Self));
-
-            byte[] shared;
-            try { shared = kx.DeriveShared(welcome.Key); }
-            catch (CryptographicException) { return PairingResult.Fail("Respuesta inválida de la otra PC."); }
-
-            var transcript = PairingCrypto.Transcript(_opts.InstanceId, welcome.Id!, joinerKey, welcome.Key, nonceJ, welcome.Nonce);
-            var confirmKey = PairingCrypto.ConfirmKey(code, transcript);
-            await SendPlainAsync(stream, new Packet
-            {
-                T = PacketType.PairConfirm,
-                Proof = PairingCrypto.ConfirmProof(confirmKey, 'J', transcript, shared),
-            }, cts.Token).ConfigureAwait(false);
-
-            var response = await ReadPlainAsync(stream, cts.Token).ConfigureAwait(false);
-            if (response.T == PacketType.Reject) return PairingResult.Fail(DescribeReject(response.Reason));
-            if (response.T != PacketType.PairConfirm ||
-                !HandshakeCrypto.FixedTimeEquals(PairingCrypto.ConfirmProof(confirmKey, 'H', transcript, shared), response.Proof))
-            {
-                Log.Warn("pairing", $"La confirmación de {ep.Address} no es válida (posible interferencia)");
-                return PairingResult.Fail("La verificación falló (posible interferencia en la red). Generá un código nuevo y probá otra vez.");
-            }
-
-            var pairKey = PairingCrypto.PairKey(shared, transcript, code);
-            CryptographicOperations.ZeroMemory(shared);
-            var newPeer = new PeerSettings
-            {
-                InstanceId = welcome.Id!,
-                Name = PeerDisplayName(welcome.Name, new PeerSettings { Name = "PC remota" }),
-                LastAddress = ep.Address.ToString(),
-                LastPort = welcome.Port is > 0 and <= 65535 ? welcome.Port.Value : ep.Port,
-                ManualAddress = manualAddress,
-                ProtectedKey = _protector.Protect(pairKey),
-                PairedUtc = DateTime.UtcNow,
-            };
-            CompletePairing(newPeer, pairKey);
-            return new PairingResult(true, null, newPeer.Clone());
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            return PairingResult.Fail("La otra PC no respondió a tiempo.");
-        }
-        catch (Exception ex) when (ex is ProtocolException or IOException or SocketException or EndOfStreamException)
-        {
-            return PairingResult.Fail("Se perdió la conexión durante la vinculación.");
-        }
-    }
-
-    private void CompletePairing(PeerSettings peer, byte[] key)
-    {
-        Log.Info("pairing", $"Vinculado con {peer.Name} (id {peer.InstanceId[..8]}…, {peer.LastAddress})");
-        ReplacePeer(peer, key);
-        PeerChanged?.Invoke(peer.Clone());
-    }
-
-    private static string DescribeReject(string? reason) => reason switch
-    {
-        RejectReason.NotPairing => "La otra PC no está esperando vinculación. Primero tocá «Mostrar código» en la otra PC.",
-        RejectReason.BadCode => "Código incorrecto.",
-        RejectReason.TooManyAttempts => "Demasiados intentos fallidos. Generá un código nuevo en la otra PC.",
-        RejectReason.Busy => "La otra PC está procesando otra vinculación. Probá de nuevo en unos segundos.",
-        RejectReason.Self => "Esa dirección corresponde a esta misma instancia de Susurro.",
-        RejectReason.Version => "La otra PC tiene una versión incompatible de Susurro.",
-        _ => "La otra PC rechazó la vinculación.",
-    };
 
     // ------------------------------------------------------------------ descubrimiento
 
-    public async Task<IReadOnlyList<DiscoveredInstance>> DiscoverAsync(TimeSpan timeout, CancellationToken ct)
+    private DiscoveryPacket DescribeSelf() => new()
     {
-        if (_discovery == null) return Array.Empty<DiscoveredInstance>();
-        return await _discovery.QueryAsync(timeout, null, ct).ConfigureAwait(false);
-    }
-
-    private DiscoveryPacket DescribeSelf()
-    {
-        lock (_gate)
-        {
-            return new DiscoveryPacket
-            {
-                Id = _opts.InstanceId,
-                Name = _localName,
-                Port = _opts.Port,
-                Pairing = _invitation is { } i && i.IsValid(DateTime.UtcNow),
-                Paired = _peer != null,
-            };
-        }
-    }
+        Id = _identity.Id,
+        Name = _localName,
+        Port = _opts.Port,
+    };
 
     private void OnPeerSeen(DiscoveredInstance d)
     {
-        PeerSession? active;
+        if (d.InstanceId == _identity.Id) return;
+        PeerSession? active = null;
+        Peer? known;
         lock (_gate)
         {
-            if (_peer == null || d.InstanceId != _peer.InstanceId) return;
-            _hint = d.EndPoint;
-            active = _session;
-            if (active == null) _consecutiveFailures = 0;
+            if (_stopped) return;
+            if (_peers.TryGetValue(d.InstanceId, out known))
+            {
+                if (known.Contact.Blocked) return;
+                known.Hint = d.EndPoint;
+                active = known.Session;
+                if (active == null) known.Failures = 0;
+            }
+            else
+            {
+                // Alguien nuevo en la red. El datagrama no es confiable: se intenta una conexión
+                // (que verifica su identidad) con límites para que no se pueda abusar.
+                var now = Environment.TickCount64;
+                if (_probeFailed.TryGetValue(d.InstanceId, out var failedAt) && now - failedAt < 60_000) return;
+                if (_probing.Count >= MaxQueuedProbes || !_probing.Add(d.InstanceId)) return;
+            }
         }
-        if (active != null)
-            active.Probe(); // la otra PC acaba de arrancar o cambió de red: ¿seguimos vivos?
-        else
-            Kick();
+        if (known != null)
+        {
+            if (active != null) active.Probe(); // la otra PC acaba de arrancar o cambió de red: ¿seguimos vivos?
+            else known.Kick();
+            return;
+        }
+        _ = ProbeNewAsync(d);
     }
 
-    // ------------------------------------------------------------------ utilidades
-
-    private void Kick()
+    private async Task ProbeNewAsync(DiscoveredInstance d)
     {
-        try { _kick.Release(); }
-        catch (SemaphoreFullException) { }
-        catch (ObjectDisposedException) { }
+        var ok = false;
+        var slot = false;
+        try
+        {
+            await _probeSlots.WaitAsync(_cts.Token).ConfigureAwait(false);
+            slot = true;
+            // Mientras esperaba su turno, quizás la otra PC ya se conectó sola.
+            if (TryGetPeer(d.InstanceId) == null)
+            {
+                var (result, _) = await DialAsync(d.EndPoint, d.InstanceId, _cts.Token).ConfigureAwait(false);
+                ok = result is DialResult.Connected or DialResult.Duplicate;
+            }
+            else ok = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Log.Warn("net", "Error conectando con una PC nueva", ex); }
+        finally
+        {
+            if (slot) _probeSlots.Release();
+            lock (_gate)
+            {
+                _probing.Remove(d.InstanceId);
+                if (!ok)
+                {
+                    if (_probeFailed.Count > 256) _probeFailed.Clear();
+                    _probeFailed[d.InstanceId] = Environment.TickCount64;
+                }
+            }
+        }
     }
+
+    // ------------------------------------------------------------------ estado
+
+    private ContactInfo DescribeLocked(Peer p)
+    {
+        var c = p.Contact;
+        if (p.Session is { Ready: true, IsClosed: false } s)
+            return new ContactInfo(c.InstanceId, c.Name, ContactStatus.Online, s.Remote.Address.ToString(), null, c.Blocked);
+        var detail = c.Blocked
+            ? null
+            : p.RejectedUs
+                ? "No acepta conexiones de esta PC."
+                : p.FirewallSuspect
+                    ? "Responde, pero el puerto TCP no es accesible (¿firewall?)."
+                    : p.DialDetail;
+        var status = p.Dialing && p.Failures < 3 ? ContactStatus.Connecting : ContactStatus.Offline;
+        return new ContactInfo(c.InstanceId, c.Name, status, c.LastAddress, detail, c.Blocked);
+    }
+
+    private IReadOnlyList<ContactInfo> SnapshotContactsLocked() =>
+        _peers.Values.Select(DescribeLocked)
+            .OrderBy(c => c.Blocked)
+            .ThenByDescending(c => c.Status == ContactStatus.Online)
+            .ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(c => c.Id, StringComparer.Ordinal)
+            .ToList();
 
     private LinkState ComputeState()
     {
         lock (_gate)
         {
-            if (_peer == null)
-            {
-                var pairing = _invitation is { } i && i.IsValid(DateTime.UtcNow);
-                return new LinkState(LinkStatus.NotPaired, null, null, _listenerError ?? (pairing ? "Esperando vinculación…" : null));
-            }
-            if (_session is { Ready: true, IsClosed: false } s)
-                return new LinkState(LinkStatus.Connected, _peer.Name, s.Remote.Address.ToString(), _listenerError);
-
-            var detail = _peerRejectedUs
-                ? "La otra PC no reconoce este vínculo. Volvé a vincular."
-                : _firewallSuspect
-                    ? "La otra PC responde, pero el puerto TCP no es accesible (¿firewall?)."
-                    : _listenerError ?? _dialDetail;
-            var status = _dialing && _consecutiveFailures < 3 ? LinkStatus.Connecting : LinkStatus.Disconnected;
-            return new LinkState(status, _peer.Name, null, detail);
+            var known = _peers.Values.Count(p => !p.Contact.Blocked);
+            var online = _peers.Values.Count(p => !p.Contact.Blocked && p.Session is { Ready: true, IsClosed: false });
+            var status = online > 0 ? LinkStatus.Online : known > 0 ? LinkStatus.NoneOnline : LinkStatus.NoContacts;
+            return new LinkState(status, online, known, _listenerError);
         }
     }
 
     private void PublishState()
     {
         var state = ComputeState();
+        bool stateChanged;
+        bool contactsChanged;
         lock (_gate)
         {
-            if (state == _lastState) return;
+            stateChanged = state != _lastState;
             _lastState = state;
+            var contacts = SnapshotContactsLocked();
+            contactsChanged = !contacts.SequenceEqual(_lastContacts);
+            if (contactsChanged) _lastContacts = contacts;
         }
-        try { StateChanged?.Invoke(state); }
+        try
+        {
+            if (stateChanged) StateChanged?.Invoke(state);
+            if (contactsChanged) ContactsChanged?.Invoke();
+        }
         catch (Exception ex) { Log.Error("net", "Error notificando estado", ex); }
     }
+
+    // ------------------------------------------------------------------ utilidades
 
     private static Packet Reject(string reason) => new() { T = PacketType.Reject, Reason = reason };
 
@@ -1381,16 +1452,46 @@ public sealed class PeerLink : IAsyncDisposable
         return SusurroJson.Deserialize(frame);
     }
 
+    /// <summary>Estado en memoria de un contacto. Se modifica bajo <c>_gate</c>.</summary>
+    private sealed class Peer
+    {
+        public Peer(ContactSettings contact) => Contact = contact;
+
+        public ContactSettings Contact { get; }
+        public PeerSession? Session { get; set; }
+        public IPEndPoint? Hint { get; set; }
+        public bool Dialing { get; set; }
+        public string? DialDetail { get; set; }
+        public int Failures { get; set; }
+        public bool RejectedUs { get; set; }
+        public bool FirewallSuspect { get; set; }
+        /// <summary>Última vez (TickCount64) que estuvo conectado en esta ejecución; 0 = no reintentar solo.</summary>
+        public long LastOnlineTick { get; set; }
+        public bool LoopStarted { get; set; }
+        public bool Removed { get; set; }
+        public SemaphoreSlim KickSignal { get; } = new(0, 1);
+        public SemaphoreSlim FlushLock { get; } = new(1, 1);
+
+        public void Kick()
+        {
+            try { KickSignal.Release(); }
+            catch (SemaphoreFullException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
     private sealed class OutMsg
     {
-        public OutMsg(string id, Packet packet, DateTime createdUtc)
+        public OutMsg(string id, string recipientId, Packet packet, DateTime createdUtc)
         {
             Id = id;
+            RecipientId = recipientId;
             Packet = packet;
             CreatedUtc = createdUtc;
         }
 
         public string Id { get; }
+        public string RecipientId { get; }
         public Packet Packet { get; }
         public DateTime CreatedUtc { get; }
         /// <summary>Número de sesión donde se escribió (0 = pendiente de envío).</summary>

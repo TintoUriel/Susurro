@@ -81,8 +81,8 @@ begin
   begin
     DataDir := ExpandConstant('{localappdata}\Susurro');
     if DirExists(DataDir) then
-      if SuppressibleMsgBox('¿Eliminar también la configuración de Susurro (nombre, vínculo con la otra PC y registro)?'#13#10#13#10 +
-                  'Si vas a reinstalar, elegí "No" para no tener que volver a vincular.',
+      if SuppressibleMsgBox('¿Eliminar también la configuración de Susurro (tu nombre, identidad, contactos y registro)?'#13#10#13#10 +
+                  'Si vas a reinstalar, elegí "No" para que tus compañeros te sigan viendo como la misma persona.',
                   mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
         DelTree(DataDir, True, True, True);
   end;

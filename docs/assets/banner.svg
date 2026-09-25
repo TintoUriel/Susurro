@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Susurro — Dos PCs. Un mensaje. Cero distracciones.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Susurro — Toda la oficina. Un mensaje. Cero distracciones.">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#11141a"/>
@@ -32,7 +32,7 @@
 
   <text x="640" y="206" text-anchor="middle" fill="#9a9da4"
         font-family="Segoe UI Variable Text, Segoe UI, Inter, -apple-system, Helvetica Neue, Arial, sans-serif" font-size="24">
-    Dos PCs. Un mensaje. Cero distracciones.
+    Toda la oficina. Un mensaje. Cero distracciones.
   </text>
 
   <!-- Subtítulo de ejemplo -->

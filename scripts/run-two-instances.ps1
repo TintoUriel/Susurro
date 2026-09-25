@@ -5,11 +5,11 @@
   Instancia A → perfil "A", puerto TCP 47820
   Instancia B → perfil "B", puerto TCP 47830
   Ambas comparten el puerto UDP de descubrimiento (47811), así que se encuentran solas.
-  Cada perfil tiene su propia configuración, InstanceId, vínculo y registro en
+  Cada perfil tiene su propia configuración, identidad, contactos y registro en
   %LOCALAPPDATA%\Susurro\profiles\<perfil>\.
 
-  La primera vez: en A abrí "Vincular…" → "Mostrar código"; en B → "Ingresar código",
-  elegí la PC encontrada (o escribí 127.0.0.1:47820) y el código.
+  La primera vez cada una pregunta un nombre (por ejemplo "Ana" y "Beto"); al elegirlo
+  se encuentran solas. Si no, en Configuración → Personas → Agregar por dirección: 127.0.0.1:47820.
 
 .EXAMPLE
   .\scripts\run-two-instances.ps1           # compila en Debug y abre A y B

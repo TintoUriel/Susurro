@@ -3,9 +3,9 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
-namespace Susurro.Core.Pairing;
+namespace Susurro.Core.Identity;
 
-/// <summary>Protege la clave de vínculo en reposo.</summary>
+/// <summary>Protege la clave privada de identidad en reposo.</summary>
 public interface IKeyProtector
 {
     string Protect(byte[] key);
@@ -20,7 +20,7 @@ public interface IKeyProtector
 [SupportedOSPlatform("windows")]
 public sealed class DpapiKeyProtector : IKeyProtector
 {
-    private static readonly byte[] Entropy = Encoding.ASCII.GetBytes("Susurro/pairkey/v1");
+    private static readonly byte[] Entropy = Encoding.ASCII.GetBytes("Susurro/identity/v2");
 
     public string Protect(byte[] key) => Convert.ToBase64String(Transform(key, protect: true));
 

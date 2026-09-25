@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -12,12 +14,18 @@ using Susurro.App.Services;
 using Susurro.App.Tray;
 using Susurro.App.Views;
 using Susurro.Core.Config;
+using Susurro.Core.Identity;
 using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
 using Susurro.Core.Net;
-using Susurro.Core.Pairing;
 
 namespace Susurro.App;
+
+/// <summary>Resultado de enviar a una persona o a todos los conectados.</summary>
+internal sealed record SendOutcome(bool Accepted, IReadOnlyList<string> MessageIds, bool AnyOnline, string? Error)
+{
+    public static SendOutcome Fail(string error) => new(false, Array.Empty<string>(), false, error);
+}
 
 /// <summary>
 /// Punto central de la aplicación: conecta configuración, red, overlay, bandeja y ventanas.
@@ -29,6 +37,7 @@ internal sealed class AppController : IDisposable
     private readonly SingleInstance _instance;
     private readonly DispatcherTimer _trimTimer;
     private SettingsStore _store = null!;
+    private LocalIdentity _identity = null!;
     private OverlayController _overlay = null!;
     private TrayIcon? _tray;
     private GlobalHotkey? _hotkey;
@@ -36,7 +45,7 @@ internal sealed class AppController : IDisposable
     private bool _quickMode;
     private MainWindow _main = null!;
     private SettingsWindow? _settingsWindow;
-    private PairingWindow? _pairingWindow;
+    private WelcomeWindow? _welcomeWindow;
     private LogWindow? _logWindow;
     private bool _exiting;
     private bool _disposed;
@@ -61,14 +70,18 @@ internal sealed class AppController : IDisposable
     public string DataDirectory => AppPaths.DataDirectory(Args.Profile);
     public bool HasTray => _tray != null;
     public bool IsExiting => _exiting;
+    /// <summary>Ya se eligió el nombre y la comunicación está en marcha.</summary>
+    public bool IsReady => Settings.SetupCompleted && Settings.FriendlyName.Length > 0;
 
     public static string Version =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
 
     public event Action<LinkState>? LinkStateChanged;
     public event Action<string, DeliveryState>? DeliveryChanged;
-    public event Action? PeerChanged;
-    public event Action? InvitationClosed;
+    /// <summary>Cambió la lista de personas o el estado de alguna.</summary>
+    public event Action? ContactsChanged;
+    /// <summary>Se completó la bienvenida (nombre elegido) o cambió el nombre.</summary>
+    public event Action? SetupChanged;
     public event Action? HotkeyChanged;
 
     /// <summary>Atajo global configurado (null = desactivado o inválido).</summary>
@@ -85,7 +98,10 @@ internal sealed class AppController : IDisposable
 
         _store = new SettingsStore(DataDirectory);
         Settings = _store.Load(Environment.MachineName, out var existed);
-        var changed = !existed;
+        _identity = LocalIdentity.LoadOrCreate(Settings.IdentityKey, new DpapiKeyProtector(), out var protectedKey);
+        var changed = !existed || protectedKey != Settings.IdentityKey || _identity.Id != Settings.InstanceId;
+        Settings.IdentityKey = protectedKey;
+        Settings.InstanceId = _identity.Id;
         // Primera ejecución: inicio con Windows activado (se desactiva en Configuración → General).
         // Los perfiles de desarrollo (--profile) no se agregan al inicio de Windows.
         if (!existed && Args.Profile != null) Settings.StartWithWindows = false;
@@ -94,8 +110,10 @@ internal sealed class AppController : IDisposable
         Settings = SettingsValidator.Normalize(Settings, Environment.MachineName);
         if (changed) Save();
 
-        Log.Info("app", $"Inicio de Susurro {Version}{(Args.Profile != null ? $" (perfil {Args.Profile})" : "")} — «{Settings.FriendlyName}», " +
-                        $"id {Settings.InstanceId[..8]}…, IP {NetworkInfo.DescribeLocalAddresses()}, puerto {Settings.Port}");
+        Log.Info("app", $"Inicio de Susurro {Version}{(Args.Profile != null ? $" (perfil {Args.Profile})" : "")} — " +
+                        $"«{(Settings.FriendlyName.Length > 0 ? Settings.FriendlyName : "sin nombre")}», " +
+                        $"id {Settings.InstanceId[..8]}…, IP {NetworkInfo.DescribeLocalAddresses()}, puerto {Settings.Port}, " +
+                        $"{Settings.Contacts.Count} contacto(s)");
 
         _overlay = new OverlayController(Settings.Overlay, m => Link.ReportShown(m), RequestTrim);
         Link = CreateLink();
@@ -117,13 +135,13 @@ internal sealed class AppController : IDisposable
         NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
         _instance.ListenForShowRequests(() => _ui.BeginInvoke(ShowMain));
 
-        Link.Start();
+        // Sin nombre no se sale a la red: nunca se muestra el nombre del equipo a los demás.
+        if (IsReady) Link.Start();
 
         var startHidden = Args.AutoStart || Args.Minimized || Settings.StartMinimized;
-        if (!Settings.SetupCompleted && !Args.AutoStart)
+        if (!IsReady)
         {
-            ShowMain();
-            ShowPairing(firstRun: true);
+            ShowWelcome(); // la ventana principal se abre al cerrarla
         }
         else if (startHidden && HasTray)
         {
@@ -144,11 +162,11 @@ internal sealed class AppController : IDisposable
     {
         var link = new PeerLink(new PeerLinkOptions
         {
-            InstanceId = Settings.InstanceId,
+            Identity = _identity,
             LocalName = Settings.FriendlyName,
             Port = Settings.Port,
             DiscoveryPort = Settings.DiscoveryPort,
-        }, new DpapiKeyProtector());
+        });
 
         link.StateChanged += s => _ui.BeginInvoke(() =>
         {
@@ -156,18 +174,19 @@ internal sealed class AppController : IDisposable
             _tray?.SetState(s);
             LinkStateChanged?.Invoke(s);
         });
-        link.MessageReceived += m => _ui.BeginInvoke(() => _overlay.Enqueue(m));
-        link.DeliveryChanged += (id, st) => _ui.BeginInvoke(() => DeliveryChanged?.Invoke(id, st));
-        link.PeerChanged += p => _ui.BeginInvoke(() =>
+        link.ContactsChanged += () => _ui.BeginInvoke(() =>
+        {
+            if (ReferenceEquals(link, Link)) ContactsChanged?.Invoke();
+        });
+        link.ContactsSaved += contacts => _ui.BeginInvoke(() =>
         {
             if (!ReferenceEquals(link, Link)) return;
-            Settings.Peer = p?.Clone();
-            if (p != null) Settings.SetupCompleted = true;
+            Settings.Contacts = contacts.Select(c => c.Clone()).ToList();
             Save();
-            PeerChanged?.Invoke();
         });
-        link.InvitationClosed += () => _ui.BeginInvoke(() => InvitationClosed?.Invoke());
-        link.SetPeer(Settings.Peer);
+        link.MessageReceived += m => _ui.BeginInvoke(() => _overlay.Enqueue(m));
+        link.DeliveryChanged += (id, st) => _ui.BeginInvoke(() => DeliveryChanged?.Invoke(id, st));
+        link.SetContacts(Settings.Contacts);
         return link;
     }
 
@@ -176,10 +195,11 @@ internal sealed class AppController : IDisposable
         var old = Link;
         Link = CreateLink();
         try { await old.StopAsync(); } catch (Exception ex) { Log.Warn("app", "Error deteniendo la conexión anterior", ex); }
-        Link.Start();
+        if (IsReady) Link.Start();
         var state = Link.State;
         _tray?.SetState(state);
         LinkStateChanged?.Invoke(state);
+        ContactsChanged?.Invoke();
     }
 
     private void CreateTray()
@@ -199,10 +219,54 @@ internal sealed class AppController : IDisposable
 
     // ------------------------------------------------------------------ acciones
 
-    public SendResult SendMessage(string text, bool urgent) => Link.Send(text, urgent, Settings.ConfirmDelivery);
+    /// <param name="recipient">InstanceId de la persona, o <see cref="AppSettings.AllRecipients"/> para todos los conectados.</param>
+    public SendOutcome SendMessage(string recipient, string text, bool urgent)
+    {
+        if (!IsReady) return SendOutcome.Fail("Primero elegí tu nombre.");
+        if (!MessageRules.TryValidate(text, out _, out var error)) return SendOutcome.Fail(error ?? "Mensaje inválido.");
+
+        List<ContactInfo> targets;
+        if (recipient == AppSettings.AllRecipients)
+        {
+            targets = Link.Contacts.Where(c => c.Status == ContactStatus.Online && !c.Blocked).ToList();
+            if (targets.Count == 0) return SendOutcome.Fail("No hay nadie conectado ahora.");
+        }
+        else
+        {
+            var one = Link.FindContact(recipient);
+            if (one == null) return SendOutcome.Fail("Elegí a quién enviarle el mensaje.");
+            targets = new List<ContactInfo> { one };
+        }
+
+        var ids = new List<string>();
+        string? firstError = null;
+        foreach (var t in targets)
+        {
+            var r = Link.Send(t.Id, text, urgent, Settings.ConfirmDelivery);
+            if (r.Accepted && r.MessageId != null) ids.Add(r.MessageId);
+            else firstError ??= r.Error;
+        }
+        if (ids.Count == 0) return SendOutcome.Fail(firstError ?? "No se pudo enviar.");
+        return new SendOutcome(true, ids, targets.Any(t => t.Status == ContactStatus.Online), null);
+    }
+
+    /// <summary>Recuerda a quién se le escribió por última vez (se preselecciona al abrir).</summary>
+    public void RememberRecipient(string? recipient)
+    {
+        if (recipient == Settings.LastRecipient) return;
+        Settings.LastRecipient = recipient;
+        Save();
+    }
+
+    public void SetBlocked(string id, bool blocked) => Link.SetBlocked(id, blocked);
+
+    public void ForgetContact(string id) => Link.Forget(id);
+
+    public Task<AddContactResult> AddContactAsync(string address, CancellationToken ct) => Link.AddByAddressAsync(address, ct);
 
     public void ShowTestMessage(OverlaySettings preview, bool urgent) =>
-        _overlay.ShowTest(SettingsValidator.NormalizeOverlay(preview.Clone()), urgent, Settings.FriendlyName);
+        _overlay.ShowTest(SettingsValidator.NormalizeOverlay(preview.Clone()), urgent,
+            Settings.FriendlyName.Length > 0 ? Settings.FriendlyName : "Susurro");
 
     public void Save() => _store.Save(Settings);
 
@@ -212,21 +276,24 @@ internal sealed class AppController : IDisposable
         var old = Settings;
         var updated = SettingsValidator.Normalize(edited.Clone(), Environment.MachineName);
         updated.InstanceId = old.InstanceId;
+        updated.IdentityKey = old.IdentityKey;
         updated.SetupCompleted = old.SetupCompleted;
         updated.MainWindowLeft = old.MainWindowLeft;
         updated.MainWindowTop = old.MainWindowTop;
-        // El vínculo lo gestiona la red; de la ventana solo se toma la dirección manual.
-        var manual = edited.Peer?.ManualAddress;
-        updated.Peer = old.Peer?.Clone();
-        if (updated.Peer != null) updated.Peer.ManualAddress = string.IsNullOrWhiteSpace(manual) ? null : manual.Trim();
+        updated.LastRecipient = old.LastRecipient;
+        // Los contactos los gestiona la red (se agregan, bloquean y quitan al instante).
+        updated.Contacts = old.Contacts.Select(c => c.Clone()).ToList();
+        if (updated.FriendlyName.Length == 0) updated.FriendlyName = old.FriendlyName;
         Settings = updated;
 
-        if (updated.FriendlyName != old.FriendlyName) Link.UpdateLocalName(updated.FriendlyName);
+        if (updated.FriendlyName != old.FriendlyName)
+        {
+            Link.UpdateLocalName(updated.FriendlyName);
+            SetupChanged?.Invoke();
+        }
         if (updated.StartWithWindows != old.StartWithWindows) AutoStart.Set(updated.StartWithWindows, Args.Profile);
         if (updated.SendHotkey != old.SendHotkey) ApplyHotkey(updated.SendHotkey);
         _overlay.UpdateSettings(updated.Overlay);
-        if (updated.Peer != null && updated.Peer.ManualAddress != old.Peer?.ManualAddress)
-            Link.UpdateManualAddress(updated.Peer.ManualAddress);
 
         if (updated.ShowTrayIcon && _tray == null) CreateTray();
         else if (!updated.ShowTrayIcon && _tray != null)
@@ -247,30 +314,22 @@ internal sealed class AppController : IDisposable
         }
     }
 
-    public void SetFriendlyName(string friendlyName)
+    /// <summary>Bienvenida completada: se guarda el nombre de la persona y se empieza a buscar compañeros.</summary>
+    public bool CompleteSetup(string friendlyName)
     {
         var name = SettingsValidator.CleanName(friendlyName);
-        if (name.Length == 0 || name == Settings.FriendlyName) return;
-        Settings.FriendlyName = name;
-        Link.UpdateLocalName(name);
-        Save();
-        Log.Info("config", "Nombre de esta PC: " + name);
-    }
-
-    public void CompleteSetup(string friendlyName)
-    {
-        SetFriendlyName(friendlyName);
-        if (Settings.SetupCompleted) return;
+        if (name.Length == 0) return false;
+        if (name != Settings.FriendlyName)
+        {
+            Settings.FriendlyName = name;
+            Link.UpdateLocalName(name);
+            Log.Info("config", "Nombre: " + name);
+        }
         Settings.SetupCompleted = true;
         Save();
-    }
-
-    public void Unpair()
-    {
-        Link.Unpair();
-        Settings.Peer = null;
-        Save();
-        PeerChanged?.Invoke();
+        Link.Start();
+        SetupChanged?.Invoke();
+        return true;
     }
 
     // ------------------------------------------------------------------ ventanas
@@ -341,10 +400,10 @@ internal sealed class AppController : IDisposable
     }
 
     /// <summary>Tras enviar: si se abrió con el atajo y hay conexión, se oculta y se vuelve al trabajo.</summary>
-    public void AfterSend()
+    public void AfterSend(bool anyOnline)
     {
         if (!_quickMode) return;
-        if (Link.State.Status != LinkStatus.Connected) return; // sin conexión: dejar visible el estado "En espera"
+        if (!anyOnline) return; // sin conexión: dejar visible el estado "En espera"
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         timer.Tick += (_, _) =>
         {
@@ -367,7 +426,10 @@ internal sealed class AppController : IDisposable
         else ShowMain();
     }
 
-    public void ShowSettings()
+    public void ShowSettings() => ShowSettings(null);
+
+    /// <param name="tab">Pestaña a mostrar (índice), o null para dejar la actual.</param>
+    public void ShowSettings(int? tab)
     {
         if (_exiting) return;
         if (_settingsWindow == null)
@@ -380,24 +442,26 @@ internal sealed class AppController : IDisposable
             };
             _settingsWindow.Show();
         }
+        if (tab is int t) _settingsWindow.SelectTab(t);
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;
         _settingsWindow.Activate();
     }
 
-    public void ShowPairing(bool firstRun = false)
+    public void ShowWelcome()
     {
         if (_exiting) return;
-        if (_pairingWindow == null)
+        if (_welcomeWindow == null)
         {
-            _pairingWindow = new PairingWindow(this, firstRun);
-            _pairingWindow.Closed += (_, _) =>
+            _welcomeWindow = new WelcomeWindow(this);
+            _welcomeWindow.Closed += (_, _) =>
             {
-                _pairingWindow = null;
+                _welcomeWindow = null;
                 RequestTrim();
+                ShowMain();
             };
-            _pairingWindow.Show();
+            _welcomeWindow.Show();
         }
-        _pairingWindow.Activate();
+        _welcomeWindow.Activate();
     }
 
     public void ShowLog()
@@ -494,6 +558,7 @@ internal sealed class AppController : IDisposable
         _hotkey?.Dispose();
         _hotkey = null;
         _instance.Dispose();
+        _identity?.Dispose();
         Log.Info("app", "Fin");
     }
 }

@@ -8,19 +8,28 @@ public static class SettingsValidator
 {
     public const int MaxNameLength = 32;
 
+    public const int MaxContacts = 200;
+
     public static AppSettings Normalize(AppSettings? s, string machineName)
     {
         s ??= new AppSettings();
+        if (s.SchemaVersion < 2)
+        {
+            // Versión con vinculación por código: se vuelve a pedir el nombre de la persona (que antes
+            // solía ser el de la PC) y los contactos se encuentran solos por la red.
+            s.SetupCompleted = false;
+            if (string.Equals(CleanName(s.FriendlyName), CleanName(machineName), StringComparison.OrdinalIgnoreCase))
+                s.FriendlyName = "";
+        }
         s.SchemaVersion = AppSettings.CurrentSchema;
 
         if (!IsValidInstanceId(s.InstanceId))
             s.InstanceId = NewInstanceId();
+        s.InstanceId = s.InstanceId.ToLowerInvariant();
 
+        // Nunca se usa el nombre del equipo: lo elige la persona en la pantalla de bienvenida.
         s.FriendlyName = CleanName(s.FriendlyName);
-        if (s.FriendlyName.Length == 0)
-            s.FriendlyName = CleanName(machineName);
-        if (s.FriendlyName.Length == 0)
-            s.FriendlyName = "PC";
+        if (s.FriendlyName.Length == 0) s.SetupCompleted = false;
 
         if (s.Port is < 1024 or > 65535) s.Port = AppSettings.DefaultPort;
         if (s.DiscoveryPort is < 1024 or > 65535 || s.DiscoveryPort == s.Port)
@@ -35,23 +44,32 @@ public static class SettingsValidator
         s.SendHotkey = s.SendHotkey == null ? AppSettings.DefaultHotkey : s.SendHotkey.Trim();
         if (s.SendHotkey.Length > 48) s.SendHotkey = AppSettings.DefaultHotkey;
 
-        if (s.Peer != null)
-        {
-            var p = s.Peer;
-            if (!IsValidInstanceId(p.InstanceId) || p.InstanceId == s.InstanceId || string.IsNullOrWhiteSpace(p.ProtectedKey))
-            {
-                s.Peer = null; // vínculo inválido: hay que volver a vincular
-            }
-            else
-            {
-                p.Name = CleanName(p.Name);
-                if (p.Name.Length == 0) p.Name = "PC remota";
-                if (p.LastPort is < 1 or > 65535) p.LastPort = 0;
-                p.ManualAddress = string.IsNullOrWhiteSpace(p.ManualAddress) ? null : p.ManualAddress.Trim();
-                p.LastAddress = string.IsNullOrWhiteSpace(p.LastAddress) ? null : p.LastAddress.Trim();
-            }
-        }
+        s.Contacts = NormalizeContacts(s.Contacts, s.InstanceId);
+        if (s.LastRecipient != AppSettings.AllRecipients && !IsValidInstanceId(s.LastRecipient)) s.LastRecipient = null;
         return s;
+    }
+
+    /// <summary>Descarta contactos inválidos, repetidos o de esta misma instancia, y limita la cantidad.</summary>
+    public static List<ContactSettings> NormalizeContacts(IEnumerable<ContactSettings?>? contacts, string localId)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<ContactSettings>();
+        foreach (var c in contacts ?? Enumerable.Empty<ContactSettings?>())
+        {
+            if (c == null || !IsValidInstanceId(c.InstanceId)) continue;
+            c.InstanceId = c.InstanceId.ToLowerInvariant();
+            if (c.InstanceId == localId || !seen.Add(c.InstanceId)) continue;
+            c.Name = CleanName(c.Name);
+            if (c.Name.Length == 0) c.Name = "Sin nombre";
+            if (c.LastPort is < 1 or > 65535) c.LastPort = 0;
+            c.ManualAddress = string.IsNullOrWhiteSpace(c.ManualAddress) ? null : c.ManualAddress.Trim();
+            c.LastAddress = string.IsNullOrWhiteSpace(c.LastAddress) ? null : c.LastAddress.Trim();
+            result.Add(c);
+        }
+        // Si sobran, se quedan los bloqueados (para que sigan bloqueados) y los vistos más recientemente.
+        return result.Count <= MaxContacts
+            ? result
+            : result.OrderByDescending(c => c.Blocked).ThenByDescending(c => c.LastSeenUtc).Take(MaxContacts).ToList();
     }
 
     public static OverlaySettings NormalizeOverlay(OverlaySettings? o)
