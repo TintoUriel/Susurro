@@ -22,15 +22,18 @@ internal sealed class OverlayController
     private readonly DispatcherTimer _gap;
     private readonly Action<WhisperMessage> _onShown;
     private readonly Action _onIdle;
+    private readonly Func<WhisperMessage, string?> _saveImage;
     private OverlaySettings _settings;
     private OverlayHost? _host;
     private bool _hiding;
 
-    public OverlayController(OverlaySettings settings, Action<WhisperMessage> onShown, Action onIdle)
+    /// <param name="saveImage">Guarda la imagen del mensaje; devuelve la ruta o null si falló.</param>
+    public OverlayController(OverlaySettings settings, Action<WhisperMessage> onShown, Action onIdle, Func<WhisperMessage, string?> saveImage)
     {
         _settings = settings.Clone();
         _onShown = onShown;
         _onIdle = onIdle;
+        _saveImage = saveImage;
         _hold = new DispatcherTimer(DispatcherPriority.Normal);
         _hold.Tick += (_, _) => EndCurrent();
         _gap = new DispatcherTimer(DispatcherPriority.Normal) { Interval = GapBetweenMessages };
@@ -86,12 +89,21 @@ internal sealed class OverlayController
         }
 
         var settings = _overrides.Remove(next.Id, out var preview) ? preview : _settings;
-        // Los importantes quedan en pantalla hasta que se les hace clic.
-        var clickToClose = next.Urgent;
+        // Los importantes y las imágenes quedan en pantalla hasta que se les hace clic.
+        var clickToClose = next.Urgent || next.IsImage;
         try
         {
             _host = new OverlayHost(next, settings);
             if (clickToClose) _host.Dismissed += OnDismissed;
+            if (next.IsImage)
+            {
+                var host = _host;
+                host.SaveRequested += () =>
+                {
+                    var path = _saveImage(next);
+                    host.MarkSaved(path != null ? "Guardada en Descargas ✓" : "No se pudo guardar");
+                };
+            }
             _host.Show();
         }
         catch (Exception ex)

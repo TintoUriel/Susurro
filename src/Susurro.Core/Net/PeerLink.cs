@@ -7,6 +7,7 @@ using Susurro.Core.Identity;
 using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
 using Susurro.Core.Protocol;
+using Susurro.Core.Transfers;
 
 namespace Susurro.Core.Net;
 
@@ -58,6 +59,10 @@ public sealed class PeerLinkOptions
     /// <summary>Mensajes recibidos con más antigüedad que esta (según el reloj del remitente corregido) se descartan.</summary>
     public TimeSpan StaleMessageAge { get; init; } = TimeSpan.FromMinutes(10);
     public TimeSpan NetworkChangeDebounce { get; init; } = TimeSpan.FromSeconds(2);
+    /// <summary>Anunciar y aceptar imágenes y archivos.</summary>
+    public bool EnableFileTransfer { get; init; } = true;
+    /// <summary>Dónde se escriben las descargas en curso (se mueven al destino al terminar).</summary>
+    public string TransferTempDirectory { get; init; } = Path.Combine(Path.GetTempPath(), "Susurro");
 }
 
 /// <summary>
@@ -93,6 +98,7 @@ public sealed class PeerLink : IAsyncDisposable
     private readonly Timer _outboxTimer;
     private readonly Timer _networkTimer;
     private readonly DiscoveryService? _discovery;
+    private readonly TransferManager _transfers;
     private readonly CancellationTokenSource _cts = new();
 
     private volatile string _localName;
@@ -118,7 +124,19 @@ public sealed class PeerLink : IAsyncDisposable
             _discovery = new DiscoveryService(_identity.Id, options.DiscoveryPort, DescribeSelf);
             _discovery.PeerSeen += OnPeerSeen;
         }
+        _transfers = new TransferManager(ReadySession, options.TransferTempDirectory);
+        _transfers.ImageReceived += m => MessageReceived?.Invoke(m);
+        _transfers.FileOffered += f => FileOffered?.Invoke(f);
+        _transfers.Progress += (id, done, total) => TransferProgress?.Invoke(id, done, total);
+        _transfers.Completed += (id, path) => TransferCompleted?.Invoke(id, path);
+        _transfers.Failed += (id, reason) => TransferFailed?.Invoke(id, reason);
+        _transfers.Delivery += (id, st) => DeliveryChanged?.Invoke(id, st);
     }
+
+    private string[]? LocalFeatures => _opts.EnableFileTransfer ? new[] { Features.Files } : null;
+
+    private bool AcceptsFiles(string[]? peerFeatures) =>
+        _opts.EnableFileTransfer && peerFeatures != null && peerFeatures.Contains(Features.Files);
 
     // ------------------------------------------------------------------ eventos / estado
 
@@ -129,6 +147,16 @@ public sealed class PeerLink : IAsyncDisposable
     public event Action<IReadOnlyList<ContactSettings>>? ContactsSaved;
     public event Action<WhisperMessage>? MessageReceived;
     public event Action<string, DeliveryState>? DeliveryChanged;
+    /// <summary>Alguien ofrece un archivo (aparece la tarjeta para descargarlo o cerrarlo).</summary>
+    public event Action<IncomingFile>? FileOffered;
+    /// <summary>Progreso de un envío o una descarga: id, bytes, total.</summary>
+    public event Action<string, long, long>? TransferProgress;
+    /// <summary>Descarga terminada: id, ruta del archivo.</summary>
+    public event Action<string, string>? TransferCompleted;
+    /// <summary>Descarga fallida: id, motivo.</summary>
+    public event Action<string, string>? TransferFailed;
+    /// <summary>Alguien empezó o dejó de escribirte: id, nombre, escribiendo.</summary>
+    public event Action<string, string, bool>? TypingChanged;
 
     public string InstanceId => _identity.Id;
     public string BootId { get; }
@@ -396,6 +424,75 @@ public sealed class PeerLink : IAsyncDisposable
         return new SendResult(true, msg.Id, null);
     }
 
+    /// <summary>
+    /// Envía una imagen (PNG/JPEG en memoria, máx. 10 MB) con un pie de foto opcional.
+    /// Solo a alguien conectado y con una versión que reciba imágenes.
+    /// </summary>
+    public SendResult SendImage(string recipientId, byte[] image, string? caption, bool urgent, bool wantReceipt)
+    {
+        var check = CheckFileRecipient(recipientId, out var session);
+        if (check != null) return check;
+        var text = MessageRules.Sanitize(caption);
+        if (text.Length > MessageRules.MaxLength) return new SendResult(false, null, $"Máximo {MessageRules.MaxLength} caracteres.");
+        return _transfers.SendImage(session!, Template(text.Length > 0 ? text : null, urgent, wantReceipt), image);
+    }
+
+    /// <summary>Ofrece un archivo: la otra persona decide si lo descarga. Solo a alguien conectado.</summary>
+    public SendResult OfferFile(string recipientId, string path, bool wantReceipt)
+    {
+        var check = CheckFileRecipient(recipientId, out var session);
+        if (check != null) return check;
+        return _transfers.OfferFile(session!, Template(null, false, wantReceipt), path);
+    }
+
+    /// <summary>Descarga un archivo ofrecido a la carpeta indicada. Devuelve un error legible o null.</summary>
+    public string? DownloadFile(string fileId, string directory) => _transfers.Download(fileId, directory);
+
+    /// <summary>Cierra la oferta sin descargar o cancela la descarga en curso.</summary>
+    public void DeclineFile(string fileId) => _transfers.Decline(fileId);
+
+    private SendResult? CheckFileRecipient(string recipientId, out PeerSession? session)
+    {
+        session = null;
+        string name;
+        lock (_gate)
+        {
+            if (_stopped) return new SendResult(false, null, "Susurro se está cerrando.");
+            if (!_peers.TryGetValue(recipientId, out var peer)) return new SendResult(false, null, "Esa persona ya no está en la lista.");
+            if (peer.Contact.Blocked) return new SendResult(false, null, $"{peer.Contact.Name} está bloqueado.");
+            name = peer.Contact.Name;
+            if (peer.Session is { Ready: true, IsClosed: false } s) session = s;
+        }
+        if (session == null) return new SendResult(false, null, $"{name} no está conectado ahora: las imágenes y los archivos solo se envían a quien está conectado.");
+        if (!session.PeerSupportsFiles || !_opts.EnableFileTransfer)
+            return new SendResult(false, null, $"{name} tiene una versión anterior de Susurro que no recibe imágenes ni archivos.");
+        return null;
+    }
+
+    private Packet Template(string? text, bool urgent, bool wantReceipt) => new()
+    {
+        Text = text,
+        Urgent = urgent ? true : null,
+        Receipt = wantReceipt ? true : null,
+        Seq = Interlocked.Increment(ref _seq),
+        Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        Name = _localName,
+    };
+
+    /// <summary>
+    /// Avisa a esas personas que estás (o ya no estás) escribiéndoles. Lo llama la ventana solo al
+    /// teclear (como mucho cada unos segundos) y al vaciar o enviar: no hay tráfico periódico.
+    /// Las versiones anteriores ignoran el aviso.
+    /// </summary>
+    public void SendTyping(IEnumerable<string> recipientIds, bool typing)
+    {
+        foreach (var id in recipientIds.Distinct())
+        {
+            var s = ReadySession(id);
+            if (s != null) _ = s.SendAsync(new Packet { T = PacketType.Typing, State = typing ? TypingState.On : TypingState.Off });
+        }
+    }
+
     /// <summary>El overlay mostró el mensaje: si el remitente lo pidió, se le avisa ("Visto").</summary>
     public void ReportShown(WhisperMessage message)
     {
@@ -486,8 +583,12 @@ public sealed class PeerLink : IAsyncDisposable
 
     private void OnSessionPacket(PeerSession session, Packet p)
     {
+        if (_transfers.Handle(session, p)) return;
         switch (p.T)
         {
+            case PacketType.Typing:
+                TypingChanged?.Invoke(session.PeerId, session.PeerName, p.State == TypingState.On);
+                break;
             case PacketType.Message:
                 HandleIncomingMessage(session, p);
                 break;
@@ -681,7 +782,9 @@ public sealed class PeerLink : IAsyncDisposable
         }
         session.PacketReceived -= OnSessionPacket;
         session.Closed -= OnSessionClosed;
+        _transfers.OnSessionClosed(session);
         RequeueSentOn(session);
+        if (wasActive) TypingChanged?.Invoke(session.PeerId, session.PeerName, false);
         if (!wasActive) return;
         if (session.Ready) Log.Info("net", $"Desconectado de {session.PeerName}: {reason}");
         PublishState();
@@ -939,6 +1042,7 @@ public sealed class PeerLink : IAsyncDisposable
             Proof = HandshakeCrypto.SessionProof(key, 'L', peerId, _identity.Id, nonceD, nonceL),
             Port = _opts.Port,
             Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Features = LocalFeatures,
         }, ct).ConfigureAwait(false);
 
         var auth = await ReadPlainAsync(stream, ct).ConfigureAwait(false);
@@ -953,7 +1057,8 @@ public sealed class PeerLink : IAsyncDisposable
         var channel = SecureChannel.Create(key, isDialer: false, nonceD, nonceL);
         var offset = hello.Ts is long ts ? ts - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
         var session = new PeerSession(socket, stream, channel, isDialer: false, dialerId: peerId, peerId,
-            DisplayName(hello.Name, peerId), hello.Boot ?? "", remote, hello.Port ?? 0, offset, _opts.Heartbeat);
+            DisplayName(hello.Name, peerId), hello.Boot ?? "", remote, hello.Port ?? 0, offset, _opts.Heartbeat,
+            AcceptsFiles(hello.Features));
 
         switch (TryActivate(session))
         {
@@ -1183,6 +1288,7 @@ public sealed class PeerLink : IAsyncDisposable
                 Nonce = nonceD,
                 Port = _opts.Port,
                 Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Features = LocalFeatures,
             }, cts.Token).ConfigureAwait(false);
 
             var welcome = await ReadPlainAsync(stream, cts.Token).ConfigureAwait(false);
@@ -1266,7 +1372,8 @@ public sealed class PeerLink : IAsyncDisposable
 
             var offset = welcome.Ts is long ts ? ts - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
             var session = new PeerSession(socket, stream, channel, isDialer: true, dialerId: _identity.Id, peerId,
-                DisplayName(welcome.Name, peerId), welcome.Boot ?? "", ep, welcome.Port ?? ep.Port, offset, _opts.Heartbeat);
+                DisplayName(welcome.Name, peerId), welcome.Boot ?? "", ep, welcome.Port ?? ep.Port, offset, _opts.Heartbeat,
+                AcceptsFiles(welcome.Features));
             handedOff = true;
             switch (TryActivate(session))
             {

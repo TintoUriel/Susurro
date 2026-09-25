@@ -10,8 +10,11 @@ public sealed record WhisperMessage(
     long Seq,
     bool WantsReceipt,
     bool IsTest = false,
-    string? SenderId = null)
+    string? SenderId = null,
+    byte[]? Image = null)
 {
+    public bool IsImage => Image is { Length: > 0 };
+
     /// <summary>Orden de llegada local (lo asigna la cola; desempata mensajes sin secuencia comparable).</summary>
     public long ArrivalOrder { get; init; }
 }
@@ -29,4 +32,6 @@ public enum DeliveryState
     Shown,
     /// <summary>No se pudo entregar (expiró sin conexión o fue rechazado).</summary>
     Failed,
+    /// <summary>La otra persona cerró el archivo sin descargarlo.</summary>
+    Declined,
 }

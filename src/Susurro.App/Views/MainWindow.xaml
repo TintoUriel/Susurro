@@ -5,7 +5,8 @@
         Style="{StaticResource SusurroWindow}"
         Icon="/Assets/Susurro.ico"
         Width="340" SizeToContent="Height"
-        WindowStartupLocation="Manual">
+        WindowStartupLocation="Manual"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="34" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
@@ -53,14 +54,22 @@
                 </Grid>
             </DockPanel>
 
+            <!-- Adjuntos: imagen pegada con Ctrl+V, archivos (📎, arrastrar o Ctrl+V) -->
+            <WrapPanel x:Name="AttachmentsPanel" Margin="0,0,0,8" Visibility="Collapsed" />
+
             <TextBox x:Name="Input" Tag="Escribir mensaje…" MaxLength="300" TextWrapping="Wrap" AcceptsReturn="False"
                      MinHeight="40" MaxHeight="104" Padding="9,8" VerticalScrollBarVisibility="Auto"
                      PreviewKeyDown="Input_PreviewKeyDown" TextChanged="Input_TextChanged"
                      AutomationProperties.Name="Mensaje" />
 
             <Grid Margin="0,10,0,0">
-                <ToggleButton x:Name="UrgentToggle" Style="{StaticResource ChipToggle}" Content="Importante" HorizontalAlignment="Left"
-                              ToolTip="Mensaje importante: queda en pantalla hasta que la otra persona le haga clic (Ctrl+I)" FontSize="12" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                    <ToggleButton x:Name="UrgentToggle" Style="{StaticResource ChipToggle}" Content="Importante"
+                                  ToolTip="Mensaje importante: queda en pantalla hasta que la otra persona le haga clic (Ctrl+I)" FontSize="12" />
+                    <Button x:Name="AttachButton" Style="{StaticResource ChromeButton}" Content="&#xE723;" FontSize="14" Height="28" Width="32"
+                            Margin="6,0,0,0" Click="Attach_Click" AutomationProperties.Name="Adjuntar archivo"
+                            ToolTip="Enviar archivos (también podés arrastrarlos a la ventana o pegarlos con Ctrl+V)" />
+                </StackPanel>
                 <TextBlock x:Name="Counter" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"
                            Foreground="{StaticResource FaintBrush}" Visibility="Collapsed" />
                 <Button x:Name="SendButton" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Right" MinWidth="96" Click="Send_Click"
@@ -80,6 +89,9 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="StatusDot" Text="○" FontSize="12" Width="14" VerticalAlignment="Center" />
                         <TextBlock x:Name="StatusText" Text="Iniciando…" FontSize="12" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TypingText" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0"
+                                   Foreground="{StaticResource AccentBrush}" FontStyle="Italic" Visibility="Collapsed"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="170" />
                     </StackPanel>
                     <TextBlock x:Name="Feedback" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource MutedBrush}" />
                 </Grid>

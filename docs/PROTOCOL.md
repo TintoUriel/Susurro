@@ -22,7 +22,8 @@ longitud es más simple, más liviano y totalmente orientado a eventos.
 ```
 
 * Antes de autenticar: payload = JSON UTF-8, máximo **4 KB** (limita abuso desde la red).
-* Después de autenticar: payload = `AES-256-GCM(JSON)` + etiqueta de 16 bytes, máximo **16 KB**.
+* Después de autenticar: payload = `AES-256-GCM(JSON)` + etiqueta de 16 bytes, máximo **64 KB**
+  (16 KB hasta la 2.0.0; por eso los bloques de archivos solo se mandan a quien anuncia `files`).
 * El tamaño se valida **antes** de reservar memoria.
 * El JSON es un único tipo "plano" (`Packet`) con campos opcionales; los campos desconocidos se
   ignoran (compatibilidad hacia adelante) y los nulos no se envían.
@@ -92,6 +93,41 @@ profile { name }                       ← cambio de nombre de la persona
 * **Mensajes viejos**: se descartan si tienen más de 10 minutos.
 * **Validación**: el texto se limpia igual al enviar y al recibir (sin caracteres de control ni
   marcas bidi, espacios colapsados) y se rechaza si está vacío o supera 300 caracteres.
+
+## Imágenes y archivos (2.1)
+
+Capacidad opcional: cada lado incluye `features: ["files"]` en `hello`/`welcome`. Solo se mandan
+imágenes y archivos a quien la anunció (las 2.0.0 no aceptan tramas de más de 16 KB); a las demás
+se les sigue mandando texto. Por eso no hizo falta subir `ProtocolConstants.Version`.
+
+```
+file     { fileId, fileName, size, kind:"image"|"file", text?, urgent?, receipt?, seq, ts, name }   ← oferta
+fileGet  { fileId }                                  ← el receptor pide el archivo (las imágenes no se piden)
+chunk    { fileId, offset, data (≤ 32 KB) }          ← bloques en orden
+fileEnd  { fileId, hash (SHA-256 de todo) }
+fileNo   { fileId, reason: declined|canceled|expired|changed|toolarge|busy|error }
+ack      { msgId = fileId, state: received | shown | progress (offset) }
+```
+
+* **Imagen**: oferta + bloques enseguida; el receptor la arma en memoria (≤ 10 MB, 40 MB en total
+  a la vez) y, con el hash correcto, la muestra. `received` = llegó; `shown` = la cerró (si se pidió).
+* **Archivo**: solo la oferta (≤ 4 GB, válida 30 min). Con *Descargar*, `fileGet` → bloques → `fileEnd`.
+  Se escribe en un temporal y, con el hash correcto, se mueve a la carpeta destino con un nombre libre.
+  El receptor confirma el progreso cada 1 MB (`ack progress`), que además mantiene viva la sesión en
+  descargas largas. `shown` = descargado (si se pidió).
+* **Validaciones** (todas antes de reservar memoria o escribir): id válido, tamaño declarado dentro
+  del límite, cada bloque con `offset` exacto y sin pasarse del tamaño, hash final; bloques no pedidos
+  se ignoran. El nombre se limpia (sin rutas, `:`, caracteres de control/bidi ni nombres reservados).
+  Si la sesión se corta, la descarga falla y se borra lo parcial.
+* Los bloques van intercalados con los mensajes (cada trama toma el turno del envío por separado).
+* Trama de sesión máxima: **64 KB** (un bloque de 32 KB en base64 ≈ 44 KB).
+
+## Está escribiendo (2.1)
+
+`typing { state: "on" | "off" }` a la persona (o a cada conectado, si se escribe a todos). Se envía al
+teclear, como mucho cada 3 s, y `off` al vaciar el campo, enviar o cambiar de destinatario. El receptor
+lo borra solo a los 6 s sin renovación, al recibir el mensaje o al cortarse la sesión. Las versiones
+anteriores ignoran el paquete.
 
 ## Latido (solo cuando hace falta)
 

@@ -1,8 +1,11 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using Susurro.Core.Config;
 using Susurro.Core.Messaging;
 
@@ -31,9 +34,10 @@ internal static class SubtitleVisual
         var background = s.ShowBackground || hc;
         var alpha = (byte)Math.Round(255 * (hc ? Math.Max(0.95, s.Opacity) : s.Opacity));
 
-        // Los importantes se cierran con un clic: sin recuadro se usa un fondo casi invisible
-        // (alfa 1) para que toda la tarjeta reciba el clic y no solo las letras.
-        Brush bg = !background ? (urgent ? new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)) : Brushes.Transparent)
+        // Los importantes y las imágenes se cierran con un clic: sin recuadro se usa un fondo casi
+        // invisible (alfa 1) para que toda la tarjeta reciba el clic y no solo las letras.
+        var clickable = urgent || message.IsImage;
+        Brush bg = !background ? (clickable ? new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)) : Brushes.Transparent)
             : hc ? new SolidColorBrush(Color.FromArgb(alpha, 0, 0, 0))
             : urgent && s.UrgentStyle == UrgentStyle.Tinted ? new SolidColorBrush(Color.FromArgb(alpha, 38, 27, 16))
             : new SolidColorBrush(Color.FromArgb(alpha, 17, 18, 21));
@@ -52,10 +56,11 @@ internal static class SubtitleVisual
         var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
 
         string? label = null;
+        var kind = urgent ? "importante" : message.IsImage ? "imagen" : null;
         if (s.ShowSenderName && !string.IsNullOrWhiteSpace(message.SenderName))
-            label = urgent ? $"{message.SenderName} · importante" : message.SenderName;
-        else if (urgent)
-            label = "importante";
+            label = kind != null ? $"{message.SenderName} · {kind}" : message.SenderName;
+        else
+            label = kind;
 
         if (label != null)
         {
@@ -72,6 +77,28 @@ internal static class SubtitleVisual
             });
         }
 
+        if (message.IsImage)
+        {
+            var source = DecodeImage(message.Image!, 2560);
+            panel.Children.Add(source != null
+                ? new Image
+                {
+                    Source = source,
+                    Stretch = Stretch.Uniform,
+                    StretchDirection = StretchDirection.DownOnly,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Tag = "image",
+                }
+                : new TextBlock
+                {
+                    Text = "(no se pudo mostrar la imagen)",
+                    Foreground = new SolidColorBrush(labelColor),
+                    FontFamily = Font,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Tag = "label",
+                });
+        }
+
         var text = new TextBlock
         {
             Text = message.Text,
@@ -84,9 +111,16 @@ internal static class SubtitleVisual
             HorizontalAlignment = HorizontalAlignment.Center,
             Tag = "text",
         };
-        panel.Children.Add(text);
+        if (!message.IsImage || message.Text.Length > 0) panel.Children.Add(text);
 
-        if (urgent)
+        if (message.IsImage)
+        {
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Tag = "actions" };
+            actions.Children.Add(new Button { Content = "Guardar", Tag = "save", Focusable = false, MinWidth = 90, Margin = new Thickness(0, 0, 8, 0) });
+            actions.Children.Add(new Button { Content = "Cerrar", Tag = "close", Focusable = false, MinWidth = 90 });
+            panel.Children.Add(actions);
+        }
+        else if (urgent)
         {
             panel.Children.Add(new TextBlock
             {
@@ -123,11 +157,51 @@ internal static class SubtitleVisual
         return card;
     }
 
+    /// <summary>
+    /// Decodifica una imagen recibida de la red de forma segura: solo PNG/JPEG, dimensiones razonables
+    /// (se leen de la cabecera antes de decodificar) y ancho acotado al decodificar (memoria acotada).
+    /// </summary>
+    public static BitmapSource? DecodeImage(byte[] data, int maxPixelWidth)
+    {
+        var isPng = data.Length > 8 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47;
+        var isJpeg = data.Length > 3 && data[0] == 0xFF && data[1] == 0xD8;
+        if (!isPng && !isJpeg) return null;
+        try
+        {
+            var header = BitmapFrame.Create(new MemoryStream(data, false), BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
+            int w = header.PixelWidth, h = header.PixelHeight;
+            if (w <= 0 || h <= 0 || w > 20000 || h > 20000 || (long)w * h > 100_000_000) return null;
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.StreamSource = new MemoryStream(data, false);
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            if (w > maxPixelWidth) image.DecodePixelWidth = maxPixelWidth;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or FileFormatException or ArgumentException or InvalidOperationException or OverflowException)
+        {
+            return null;
+        }
+    }
+
     public static void ApplyFontSize(Border card, double size)
     {
         card.Padding = new Thickness(Math.Round(size * 1.05), Math.Round(size * 0.55), Math.Round(size * 1.05), Math.Round(size * 0.6));
         foreach (var child in ((StackPanel)card.Child).Children)
         {
+            if (child is Image img)
+            {
+                img.Margin = new Thickness(0, Math.Round(size * 0.1), 0, Math.Round(size * 0.35));
+                continue;
+            }
+            if (child is StackPanel { Tag: "actions" } actions)
+            {
+                actions.Margin = new Thickness(0, Math.Round(size * 0.45), 0, 0);
+                foreach (var b in actions.Children.OfType<Button>()) b.FontSize = Math.Max(12, Math.Round(size * 0.55));
+                continue;
+            }
             if (child is not TextBlock tb) continue;
             if ((string)tb.Tag == "label")
             {

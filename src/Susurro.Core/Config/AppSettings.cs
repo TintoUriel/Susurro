@@ -38,7 +38,7 @@ public sealed class OverlaySettings
     /// <summary>"auto" (monitor de la ventana activa), "primary" o nombre de dispositivo (\\.\DISPLAY2).</summary>
     public string Monitor { get; set; } = MonitorAuto;
     public OverlayPosition Position { get; set; } = OverlayPosition.BottomCenter;
-    public int DurationSeconds { get; set; } = 5;
+    public int DurationSeconds { get; set; } = 8;
     public double FontSize { get; set; } = 22;
     /// <summary>Opacidad del fondo (0.3–1). El texto siempre es opaco.</summary>
     public double Opacity { get; set; } = 0.86;

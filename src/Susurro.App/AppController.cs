@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Reflection;
@@ -18,13 +19,19 @@ using Susurro.Core.Identity;
 using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
 using Susurro.Core.Net;
+using Susurro.Core.Transfers;
 
 namespace Susurro.App;
 
+/// <summary>Qué se envió con cada id (para mostrar el estado adecuado).</summary>
+internal enum SentKind { Text, Image, File }
+
 /// <summary>Resultado de enviar a una persona o a todos los conectados.</summary>
-internal sealed record SendOutcome(bool Accepted, IReadOnlyList<string> MessageIds, bool AnyOnline, string? Error)
+/// <param name="Warning">Algo no se pudo enviar a alguien (p. ej. versión anterior), aunque el resto sí.</param>
+internal sealed record SendOutcome(bool Accepted, IReadOnlyDictionary<string, SentKind> Sent, bool AnyOnline, string? Error, string? Warning = null)
 {
-    public static SendOutcome Fail(string error) => new(false, Array.Empty<string>(), false, error);
+    public IReadOnlyCollection<string> MessageIds => (IReadOnlyCollection<string>)Sent.Keys;
+    public static SendOutcome Fail(string error) => new(false, new Dictionary<string, SentKind>(), false, error);
 }
 
 /// <summary>
@@ -40,6 +47,9 @@ internal sealed class AppController : IDisposable
     private LocalIdentity _identity = null!;
     private OverlayController _overlay = null!;
     private TrayIcon? _tray;
+    private FilesPanel _files = null!;
+    private readonly Dictionary<string, (string Name, DateTime Until)> _typing = new();
+    private readonly DispatcherTimer _typingTimer;
     private GlobalHotkey? _hotkey;
     private IntPtr _quickReturnTo;
     private bool _quickMode;
@@ -56,6 +66,8 @@ internal sealed class AppController : IDisposable
         _instance = instance;
         _ui = ui;
         _trimTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(4) };
+        _typingTimer = new DispatcherTimer(DispatcherPriority.Background);
+        _typingTimer.Tick += (_, _) => ExpireTyping();
         _trimTimer.Tick += (_, _) =>
         {
             _trimTimer.Stop();
@@ -83,6 +95,10 @@ internal sealed class AppController : IDisposable
     /// <summary>Se completó la bienvenida (nombre elegido) o cambió el nombre.</summary>
     public event Action? SetupChanged;
     public event Action? HotkeyChanged;
+    /// <summary>Cambió quién te está escribiendo (ver <see cref="TypingText"/>).</summary>
+    public event Action? TypingChanged;
+    /// <summary>Progreso de algo que enviaste: id, bytes, total.</summary>
+    public event Action<string, long, long>? SendProgress;
 
     /// <summary>Atajo global configurado (null = desactivado o inválido).</summary>
     public HotkeyGesture? Hotkey => _hotkey?.Current;
@@ -115,7 +131,17 @@ internal sealed class AppController : IDisposable
                         $"id {Settings.InstanceId[..8]}…, IP {NetworkInfo.DescribeLocalAddresses()}, puerto {Settings.Port}, " +
                         $"{Settings.Contacts.Count} contacto(s)");
 
-        _overlay = new OverlayController(Settings.Overlay, m => Link.ReportShown(m), RequestTrim);
+        _overlay = new OverlayController(Settings.Overlay, m => Link.ReportShown(m), RequestTrim, SaveImage);
+        _files = new FilesPanel(() => Settings.Overlay);
+        _files.DownloadRequested += DownloadFile;
+        _files.CloseRequested += id =>
+        {
+            Link.DeclineFile(id);
+            _files.Remove(id);
+            RequestTrim();
+        };
+        _files.OpenRequested += path => Launch(path, null);
+        _files.ShowInFolderRequested += path => Launch("explorer.exe", $"/select,\"{path}\"");
         Link = CreateLink();
         if (Settings.ShowTrayIcon) CreateTray();
         _main = new MainWindow(this);
@@ -166,6 +192,7 @@ internal sealed class AppController : IDisposable
             LocalName = Settings.FriendlyName,
             Port = Settings.Port,
             DiscoveryPort = Settings.DiscoveryPort,
+            TransferTempDirectory = Path.Combine(DataDirectory, "incoming"),
         });
 
         link.StateChanged += s => _ui.BeginInvoke(() =>
@@ -184,7 +211,24 @@ internal sealed class AppController : IDisposable
             Settings.Contacts = contacts.Select(c => c.Clone()).ToList();
             Save();
         });
-        link.MessageReceived += m => _ui.BeginInvoke(() => _overlay.Enqueue(m));
+        link.MessageReceived += m => _ui.BeginInvoke(() =>
+        {
+            if (m.SenderId != null) SetTyping(m.SenderId, null, false); // ya llegó lo que escribía
+            _overlay.Enqueue(m);
+        });
+        link.FileOffered += f => _ui.BeginInvoke(() =>
+        {
+            SetTyping(f.SenderId, null, false);
+            _files.Add(f);
+        });
+        link.TransferProgress += (id, done, total) => _ui.BeginInvoke(() =>
+        {
+            _files.SetProgress(id, done, total);
+            SendProgress?.Invoke(id, done, total);
+        });
+        link.TransferCompleted += (id, path) => _ui.BeginInvoke(() => _files.SetCompleted(id, path));
+        link.TransferFailed += (id, reason) => _ui.BeginInvoke(() => _files.SetFailed(id, reason));
+        link.TypingChanged += (id, name, on) => _ui.BeginInvoke(() => SetTyping(id, name, on));
         link.DeliveryChanged += (id, st) => _ui.BeginInvoke(() => DeliveryChanged?.Invoke(id, st));
         link.SetContacts(Settings.Contacts);
         return link;
@@ -220,10 +264,16 @@ internal sealed class AppController : IDisposable
     // ------------------------------------------------------------------ acciones
 
     /// <param name="recipient">InstanceId de la persona, o <see cref="AppSettings.AllRecipients"/> para todos los conectados.</param>
-    public SendOutcome SendMessage(string recipient, string text, bool urgent)
+    /// <param name="attachments">Imagen pegada y/o archivos. Con una imagen, el texto va como pie de foto.</param>
+    public SendOutcome SendMessage(string recipient, string text, bool urgent, IReadOnlyList<Attachment>? attachments = null)
     {
         if (!IsReady) return SendOutcome.Fail("Primero elegí tu nombre.");
-        if (!MessageRules.TryValidate(text, out _, out var error)) return SendOutcome.Fail(error ?? "Mensaje inválido.");
+        attachments ??= Array.Empty<Attachment>();
+        var hasText = MessageRules.Sanitize(text).Length > 0;
+        if (attachments.Count == 0 || hasText)
+        {
+            if (!MessageRules.TryValidate(text, out _, out var error)) return SendOutcome.Fail(error ?? "Mensaje inválido.");
+        }
 
         List<ContactInfo> targets;
         if (recipient == AppSettings.AllRecipients)
@@ -238,16 +288,134 @@ internal sealed class AppController : IDisposable
             targets = new List<ContactInfo> { one };
         }
 
-        var ids = new List<string>();
+        var sent = new Dictionary<string, SentKind>();
         string? firstError = null;
+        var images = attachments.OfType<ImageAttachment>().ToList();
+        var files = attachments.OfType<FileAttachment>().ToList();
         foreach (var t in targets)
         {
-            var r = Link.Send(t.Id, text, urgent, Settings.ConfirmDelivery);
-            if (r.Accepted && r.MessageId != null) ids.Add(r.MessageId);
-            else firstError ??= r.Error;
+            void Track(SendResult r, SentKind kind)
+            {
+                if (r.Accepted && r.MessageId != null) sent[r.MessageId] = kind;
+                else firstError ??= r.Error;
+            }
+            for (var i = 0; i < images.Count; i++)
+                Track(Link.SendImage(t.Id, images[i].Data, i == 0 ? text : null, urgent, Settings.ConfirmDelivery), SentKind.Image);
+            foreach (var f in files)
+                Track(Link.OfferFile(t.Id, f.Path, Settings.ConfirmDelivery), SentKind.File);
+            if (hasText && images.Count == 0)
+                Track(Link.Send(t.Id, text, urgent, Settings.ConfirmDelivery), SentKind.Text);
         }
-        if (ids.Count == 0) return SendOutcome.Fail(firstError ?? "No se pudo enviar.");
-        return new SendOutcome(true, ids, targets.Any(t => t.Status == ContactStatus.Online), null);
+        if (sent.Count == 0) return SendOutcome.Fail(firstError ?? "No se pudo enviar.");
+        if (attachments.Count > 0) SetTypingOffAfterSend(targets);
+        return new SendOutcome(true, sent, targets.Any(t => t.Status == ContactStatus.Online), null, firstError);
+    }
+
+    private void SetTypingOffAfterSend(IEnumerable<ContactInfo> targets) => Link.SendTyping(targets.Select(t => t.Id), false);
+
+    // ------------------------------------------------------------------ "está escribiendo"
+
+    /// <summary>La ventana avisa que estás (o ya no) escribiéndole a alguien o a todos los conectados.</summary>
+    public void NotifyTyping(string? recipient, bool typing)
+    {
+        if (!IsReady || recipient == null) return;
+        var ids = recipient == AppSettings.AllRecipients
+            ? Link.Contacts.Where(c => c.Status == ContactStatus.Online && !c.Blocked).Select(c => c.Id)
+            : new[] { recipient };
+        Link.SendTyping(ids, typing);
+    }
+
+    /// <summary>"Ana está escribiendo…", "Ana y Beto están escribiendo…" o null.</summary>
+    public string? TypingText
+    {
+        get
+        {
+            var names = _typing.Values.Select(v => v.Name).Distinct().ToList();
+            return names.Count switch
+            {
+                0 => null,
+                1 => $"{names[0]} está escribiendo…",
+                2 => $"{names[0]} y {names[1]} están escribiendo…",
+                _ => $"{names.Count} personas están escribiendo…",
+            };
+        }
+    }
+
+    /// <summary>
+    /// Quien escribe avisa al teclear (cada pocos segundos); si deja de llegar el aviso, se borra solo
+    /// a los 6 s. Un único temporizador de un disparo, programado al vencimiento más cercano.
+    /// </summary>
+    private void SetTyping(string peerId, string? name, bool on)
+    {
+        var changed = on
+            ? !_typing.ContainsKey(peerId)
+            : _typing.Remove(peerId);
+        if (on) _typing[peerId] = (SettingsValidator.CleanName(name) is { Length: > 0 } n ? n : "Alguien", DateTime.UtcNow.AddSeconds(6));
+        ScheduleTypingExpiry();
+        if (changed) TypingChanged?.Invoke();
+    }
+
+    private void ExpireTyping()
+    {
+        _typingTimer.Stop();
+        var now = DateTime.UtcNow;
+        var expired = _typing.Where(kv => kv.Value.Until <= now).Select(kv => kv.Key).ToList();
+        foreach (var id in expired) _typing.Remove(id);
+        ScheduleTypingExpiry();
+        if (expired.Count > 0) TypingChanged?.Invoke();
+    }
+
+    private void ScheduleTypingExpiry()
+    {
+        _typingTimer.Stop();
+        if (_typing.Count == 0) return;
+        var next = _typing.Values.Min(v => v.Until) - DateTime.UtcNow;
+        _typingTimer.Interval = next < TimeSpan.FromMilliseconds(100) ? TimeSpan.FromMilliseconds(100) : next;
+        _typingTimer.Start();
+    }
+
+    // ------------------------------------------------------------------ imágenes y archivos recibidos
+
+    private void DownloadFile(string id)
+    {
+        var error = Link.DownloadFile(id, Attachments.DownloadsFolder());
+        if (error != null) _files.SetFailed(id, error);
+        else _files.SetDownloading(id);
+    }
+
+    /// <summary>Guarda una imagen recibida en Descargas ("Imagen de Ana 2026-09-25 12.30.05.png").</summary>
+    private string? SaveImage(WhisperMessage message)
+    {
+        if (message.Image == null) return null;
+        try
+        {
+            var dir = Attachments.DownloadsFolder();
+            Directory.CreateDirectory(dir);
+            var name = FileNames.Sanitize($"Imagen de {message.SenderName} {message.SentAt.ToLocalTime():yyyy-MM-dd HH.mm.ss}{Attachments.ImageExtension(message.Image)}", "imagen.png");
+            var path = FileNames.UniquePath(dir, name);
+            File.WriteAllBytes(path, message.Image);
+            Log.Info("files", "Imagen guardada en Descargas");
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("files", "No se pudo guardar la imagen", ex);
+            return null;
+        }
+    }
+
+    private static void Launch(string file, string? args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(file) { UseShellExecute = true };
+            if (args != null) psi.Arguments = args;
+            Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("files", "No se pudo abrir", ex);
+        }
     }
 
     /// <summary>Recuerda a quién se le escribió por última vez (se preselecciona al abrir).</summary>
@@ -528,6 +696,7 @@ internal sealed class AppController : IDisposable
         Log.Info("app", "Cerrando Susurro");
         RememberMainPosition();
         _overlay.Clear();
+        _files.Dispose();
         foreach (var w in Application.Current.Windows.OfType<Window>().ToList())
         {
             try { w.Close(); } catch { }
@@ -553,6 +722,7 @@ internal sealed class AppController : IDisposable
         NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
         NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
         _trimTimer.Stop();
+        _typingTimer.Stop();
         _tray?.Dispose();
         _tray = null;
         _hotkey?.Dispose();

@@ -5,8 +5,9 @@ el protocolo y la identidad, en [docs/PROTOCOL.md](docs/PROTOCOL.md) y [docs/IDE
 
 ## Qué es
 
-Susurro: mensajes breves (≤ 300 caracteres) entre las PCs Windows de una oficina (misma LAN), mostrados
-como un subtítulo overlay que no roba el foco. Cada persona elige a quién escribirle (o a todos los
+Susurro: mensajes breves (≤ 300 caracteres), imágenes (Ctrl+V) y archivos entre las PCs Windows de una
+oficina (misma LAN), mostrados como un subtítulo overlay que no roba el foco (los archivos, como tarjetas
+arriba a la izquierda para descargar o cerrar), con aviso de "está escribiendo". Cada persona elige a quién escribirle (o a todos los
 conectados). P2P directo por TCP en malla, sin servidor, sin nube, sin historial, **sin códigos**: las
 PCs se encuentran solas y cada una se identifica con su clave pública.
 
@@ -64,6 +65,11 @@ Claves del modelo:
   Única excepción al click-through: los mensajes **importantes** (`Urgent` en el protocolo) no llevan
   `WS_EX_TRANSPARENT` y se cierran con un clic, pero siguen sin activarse (`MA_NOACTIVATE`). No se van
   solos, y su `ack shown` ("Visto") se envía al hacer clic.
+- **Imágenes y archivos** (`Core/Transfers/TransferManager`): por la sesión cifrada en bloques de 32 KB;
+  trama de sesión ≤ 64 KB. Solo con quien anunció la capacidad `files` en el saludo (compatibilidad con la
+  2.0.0 sin subir la versión). Validar offset/tamaño/hash; limpiar siempre el nombre con `FileNames.Sanitize`;
+  nunca dejar archivos a medias en el destino (temporal + mover). Las ventanas de archivos/imágenes reciben
+  clics pero no se activan (igual que los importantes).
 - **Seguridad**: no confiar en la IP, en el nombre ni en datos de descubrimiento; verificar siempre
   `id == hash(clave)` y la prueba HMAC antes de aceptar a alguien. Validar tamaños de trama **antes** de
   reservar memoria. La clave privada en disco se protege con DPAPI. Cambios de protocolo → subir

@@ -9,9 +9,9 @@
 ![WPF](https://img.shields.io/badge/UI-WPF-1c1d21?style=flat-square)
 ![LAN P2P](https://img.shields.io/badge/red-LAN%20P2P-1c1d21?style=flat-square)
 ![Cifrado](https://img.shields.io/badge/cifrado-AES--256--GCM-1c1d21?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-73%20OK-6fbf8e?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-94%20OK-6fbf8e?style=flat-square)
 
-**Mensajes breves entre las PCs de la oficina, que aparecen como un subtítulo discreto.**<br>
+**Mensajes breves, imágenes y archivos entre las PCs de la oficina, como un subtítulo discreto.**<br>
 Sin servidor · sin nube · sin cuentas · sin códigos · sin sonidos · sin robar el foco
 
 <a href="https://github.com/TintoUriel/Susurro/releases/latest"><img src="https://img.shields.io/badge/Descargar-Susurro.exe-8aa9d6?style=for-the-badge&logo=windows&logoColor=101216&labelColor=e7e8ea" alt="Descargar Susurro.exe"></a>
@@ -43,6 +43,8 @@ pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés u
 - <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde **cualquier programa** abre Susurro listo para escribir
 - **Para:** una persona o todos los conectados · <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> cambia mientras escribís
 - <kbd>Enter</kbd> envía y te devuelve a lo que estabas · <kbd>Ctrl</kbd>+<kbd>I</kbd> importante · <kbd>Esc</kbd> oculta
+- <kbd>Ctrl</kbd>+<kbd>V</kbd> pega una **imagen** o **archivos** copiados · 📎 o arrastrar para adjuntar
+- Ves cuándo alguien **te está escribiendo**
 - Máximo 300 caracteres; el campo se limpia y conserva el foco
 - `Enviado` → `Entregado ✓` → `Visto ✓`
 - Vive en la bandeja del sistema y arranca con Windows
@@ -57,6 +59,9 @@ pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés u
 | | |
 |---|---|
 | ⌨️ **Atajo global** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde cualquier programa: escribís, <kbd>Enter</kbd>, y volvés a lo que estabas. Configurable. |
+| 🖼️ **Imágenes con Ctrl+V** | Copiás una captura o una imagen y la pegás en el mensaje: le aparece a la otra persona en el subtítulo, con tu comentario, hasta que la cierra o la **guarda** en Descargas. |
+| 📎 **Archivos** | Pegalos, arrastralos o elegilos con 📎. A la otra persona le aparece una tarjeta **arriba a la izquierda** con **Descargar** o **Cerrar**; viajan recién cuando elige descargar, con progreso, y quedan en su carpeta Descargas. |
+| ✍️ **Está escribiendo…** | Al lado de "1 persona conectada" ves quién te está escribiendo en ese momento. |
 | 🪶 **Liviano de verdad** | 0 % de CPU en reposo (sin sondeo ni bucles), ~9 MB residentes en la bandeja, configuración de pocos KB. |
 | 👥 **Toda la oficina** | Cada persona con Susurro en la red aparece sola en la lista. Le escribís a una o a todos los conectados. |
 | 🙋 **Tu nombre, no el de la PC** | La primera vez te pregunta cómo te llamás; así te ven los demás. Sin códigos ni vinculación. |
@@ -78,6 +83,28 @@ pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés u
       <sub><b>Estilo cine</b> — amarillo, sin recuadro y con contorno</sub>
     </td>
     <td align="center" width="50%">
+      <img src="docs/assets/overlay.png" alt="Mensaje normal como subtítulo" width="100%"><br>
+      <sub><b>Mensaje</b> — aparece unos segundos y se va solo</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/imagen.png" alt="Imagen recibida en el subtítulo, con Guardar y Cerrar" width="100%"><br>
+      <sub><b>Imagen</b> — pegada con Ctrl+V; se guarda o se cierra</sub>
+    </td>
+    <td align="center">
+      <img src="docs/assets/archivo.png" alt="Tarjeta de archivo recibido arriba a la izquierda" width="92%"><br>
+      <sub><b>Archivo</b> — aparece arriba a la izquierda: Descargar o Cerrar</sub><br><br>
+      <img src="docs/assets/adjuntar.png" alt="Imagen adjunta con un comentario" width="70%"><br>
+      <sub><b>Adjuntar</b> — Ctrl+V, 📎 o arrastrar</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/escribiendo.png" alt="Ana está escribiendo…" width="70%"><br>
+      <sub><b>Está escribiendo…</b> al lado del estado</sub>
+    </td>
+    <td align="center">
       <img src="docs/assets/importante.png" alt="Mensaje importante" width="100%"><br>
       <sub><b>Importante</b> — queda hasta que le hacés clic</sub>
     </td>
@@ -375,6 +402,26 @@ más de uno, **Todos los conectados**. <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</
 sacar las manos del texto. Si la persona está desconectada, el mensaje espera hasta 2 minutos. Al enviar
 a todos, el estado se resume: *Entregado a 3 de 4*, *Visto por todos ✓*.
 
+**Imágenes**: copiá una imagen (una captura con <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, "Copiar imagen"
+en el navegador…) y apretá <kbd>Ctrl</kbd>+<kbd>V</kbd> en el campo de mensaje: aparece adjunta con su
+miniatura y lo que escribas va como comentario. A la otra persona le aparece en el subtítulo con
+**Guardar** (a su carpeta Descargas) y **Cerrar**; queda hasta que la cierra, y ahí te llega *Vista ✓*.
+Hasta 10 MB (las más grandes se comprimen solas). Solo a quien está conectado.
+
+**Archivos**: pegalos con <kbd>Ctrl</kbd>+<kbd>V</kbd> (copiados en el Explorador), arrastralos a la ventana
+o elegilos con 📎 (hasta 4 GB, hasta 10 por envío). A la otra persona le aparece una tarjeta **arriba
+a la izquierda** de la pantalla —que tampoco le roba el foco— con quién lo manda, nombre y tamaño,
+y **Descargar** / **Cerrar**. El archivo viaja recién cuando elige descargarlo (con barra de progreso),
+cifrado como los mensajes, y se verifica con SHA-256; se guarda en su carpeta **Descargas** (con otro
+nombre si ya existe) y después puede **Abrir** o **Mostrar en carpeta**. Vos ves *Archivo ofrecido ✓* →
+*Enviando… 45 %* → *Descargado ✓* (o *Lo cerró sin descargar*). Por seguridad, el nombre recibido se
+limpia (sin rutas ni nombres reservados) y el archivo queda marcado como descargado de otra PC, así
+Windows avisa antes de ejecutar un programa. La oferta dura 30 minutos.
+
+**Está escribiendo…**: mientras alguien te escribe (a vos o a todos los conectados), al lado de
+"1 persona conectada" aparece *· Ana está escribiendo…*. El aviso se manda al teclear (como mucho
+cada 3 s), se borra solo a los 6 s sin teclas nuevas y al llegar el mensaje: no hay tráfico periódico.
+
 **Bandeja del sistema**: clic izquierdo muestra/oculta la ventana; clic derecho abre el menú
 *Mostrar ventana · Ocultar ventana · Configuración · Salir*. El punto del icono es verde si hay
 alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar la ventana la oculta en la bandeja.
@@ -400,7 +447,10 @@ alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar
   - no captura teclado ni mouse, no minimiza ni toca la aplicación activa.
 - Un mensaje a la vez. Los que llegan mientras hay uno visible esperan en una cola (máx. 20); los
   importantes pasan delante de los normales pendientes, sin interrumpir al actual.
-- Duración configurable (2, 5, 8 o 10 s) + hasta 4 s extra de lectura para textos largos.
+- Duración configurable (2, 5, **8** —predeterminado— o 10 s) + hasta 4 s extra de lectura para textos largos.
+- **Imágenes**: la imagen (hasta el 45 % del alto de la pantalla) con el comentario debajo y los botones
+  *Guardar* / *Cerrar*. Como los importantes, recibe clics sin activarse y queda hasta que se cierra.
+  Antes de decodificarla se valida que sea PNG/JPEG y que sus dimensiones sean razonables.
 - **Mensajes importantes** (botón *Importante* o <kbd>Ctrl</kbd>+<kbd>I</kbd> al escribir): no se van
   solos, quedan en pantalla con la leyenda *Clic para cerrar* hasta que se les hace clic. Esa ventana
   recibe el clic pero sigue sin activarse (`WS_EX_NOACTIVATE` + `MA_NOACTIVATE`): el foco no se mueve
@@ -428,7 +478,8 @@ alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar
 Sin recuadro de fondo, el texto flota como un subtítulo de película; el contorno oscuro se
 activa solo para que se lea sobre cualquier fondo.
 
-Archivos (todo en `%LOCALAPPDATA%\Susurro\`): `settings.json` (unos pocos KB) y `logs\`. Nada más.
+Archivos (todo en `%LOCALAPPDATA%\Susurro\`): `settings.json` (unos pocos KB) y `logs\`. Las descargas en
+curso se escriben en `incoming\` y al terminar se mueven a Descargas (nunca queda un archivo a medias).
 
 ## Rendimiento
 
@@ -453,7 +504,7 @@ al cerrarse, recorte de memoria solo tras eventos (no periódico), icono de band
 dotnet test tests/Susurro.Core.Tests
 ```
 
-73 tests (xUnit):
+94 tests (xUnit):
 
 - **Protocolo y serialización**: ida y vuelta de paquetes, JSON inválido, campos desconocidos,
   tramas (tamaño máximo, truncadas, EOF), AES-GCM (manipulación, repetición, reordenamiento, otra clave).
@@ -467,6 +518,12 @@ dotnet test tests/Susurro.Core.Tests
   tres personas con mensajes solo al elegido, cambio de nombre, reconexión tras reinicio con entrega
   de mensajes en espera, reconexión con otro puerto, suplantación de id rechazada, versión vieja
   rechazada, bloquear/desbloquear, quitar contacto, basura en el puerto, descubrimiento UDP.
+- **Imágenes y archivos**: imagen completa con comentario y Entregada/Vista, archivo que solo viaja al
+  pedirlo (progreso de ambos lados, contenido idéntico, aviso de descargado), nombres repetidos, cerrar
+  una oferta, archivo que cambió después de ofrecerse, corte a mitad de descarga sin archivos a medias,
+  versión anterior sin archivos (error claro, el texto sigue andando), límites y persona desconectada,
+  nombres peligrosos (`..\`, `CON`, flujos `:`, caracteres bidi), un bloque entra en una trama.
+- **Está escribiendo**: llega a la persona, se apaga y se borra al desconectarse.
 
 ## Decisiones técnicas
 
@@ -483,3 +540,5 @@ dotnet test tests/Susurro.Core.Tests
 | Instalador | Inno Setup (solo al compilar) | Instalador estándar y pequeño; alternativa portátil sin dependencias |
 | Publicación | single-file autocontenido, sin comprimir, sin trimming | Comprimir sube la RAM al arrancar; WPF no admite trimming |
 | Mensajes en espera | 2 min, máx. 20 por persona, en memoria | Un "susurro" viejo no tiene sentido; nada se escribe a disco |
+| Imágenes y archivos | Por la misma sesión cifrada, en bloques de 32 KB; imágenes en memoria (≤ 10 MB), archivos solo si se piden | Sin servidor ni carpetas compartidas; nada viaja ni se guarda sin que la persona lo decida |
+| Compatibilidad | Capacidad `files` anunciada en el saludo (sin subir la versión del protocolo) | La 2.1 sigue hablando con la 2.0.0: texto sí, archivos solo con quien los entiende |

@@ -33,8 +33,10 @@ internal sealed class PeerSession
     private int _closed;
 
     public PeerSession(Socket socket, NetworkStream stream, SecureChannel channel, bool isDialer, string dialerId,
-        string peerId, string peerName, string peerBoot, IPEndPoint remote, int peerPort, long clockOffsetMs, HeartbeatOptions heartbeat)
+        string peerId, string peerName, string peerBoot, IPEndPoint remote, int peerPort, long clockOffsetMs, HeartbeatOptions heartbeat,
+        bool peerSupportsFiles = false)
     {
+        PeerSupportsFiles = peerSupportsFiles;
         _socket = socket;
         _stream = stream;
         _channel = channel;
@@ -56,6 +58,8 @@ internal sealed class PeerSession
     public bool IsDialer { get; }
     public string DialerId { get; }
     public string PeerId { get; }
+    /// <summary>La otra PC anunció que recibe imágenes y archivos (versión 2.1 o posterior).</summary>
+    public bool PeerSupportsFiles { get; }
     public string PeerName { get; set; }
     public string PeerBoot { get; }
     public IPEndPoint Remote { get; }

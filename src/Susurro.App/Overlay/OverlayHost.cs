@@ -38,7 +38,7 @@ internal sealed class OverlayHost : IDisposable
     {
         var monitor = MonitorService.Resolve(settings.Monitor);
         _animate = settings.Animations && SystemParameters.ClientAreaAnimation;
-        _clickToClose = message.Urgent;
+        _clickToClose = message.Urgent || message.IsImage;
 
         var parameters = new HwndSourceParameters("SusurroOverlay")
         {
@@ -65,6 +65,26 @@ internal sealed class OverlayHost : IDisposable
             _card.MouseLeftButtonUp += (_, _) => Dismissed?.Invoke();
             _card.MouseRightButtonUp += (_, _) => Dismissed?.Invoke();
         }
+        foreach (var button in FindButtons(_card))
+        {
+            if ((string)button.Tag == "save")
+            {
+                _saveButton = button;
+                button.Click += (_, e) =>
+                {
+                    e.Handled = true;
+                    SaveRequested?.Invoke();
+                };
+            }
+            else if ((string)button.Tag == "close")
+            {
+                button.Click += (_, e) =>
+                {
+                    e.Handled = true;
+                    Dismissed?.Invoke();
+                };
+            }
+        }
         root.Children.Add(_card);
         _source.RootVisual = root;
 
@@ -73,8 +93,31 @@ internal sealed class OverlayHost : IDisposable
 
     public IntPtr Handle => _source.Handle;
 
-    /// <summary>Se hizo clic en un mensaje importante (solo esos reciben clics).</summary>
+    /// <summary>Se hizo clic en un mensaje importante o se cerró una imagen (solo esos reciben clics).</summary>
     public event Action? Dismissed;
+
+    /// <summary>Se pidió guardar la imagen.</summary>
+    public event Action? SaveRequested;
+
+    private Button? _saveButton;
+
+    /// <summary>Muestra el resultado de guardar en el propio botón ("Guardada ✓").</summary>
+    public void MarkSaved(string text)
+    {
+        if (_saveButton == null) return;
+        _saveButton.Content = text;
+        _saveButton.IsEnabled = false;
+    }
+
+    private static System.Collections.Generic.IEnumerable<Button> FindButtons(object node)
+    {
+        if (node is Button b) yield return b;
+        if (node is Panel p)
+            foreach (var child in p.Children)
+                foreach (var nested in FindButtons(child)) yield return nested;
+        if (node is Border { Child: { } c })
+            foreach (var nested in FindButtons(c)) yield return nested;
+    }
 
     public void Show()
     {
@@ -149,6 +192,14 @@ internal sealed class OverlayHost : IDisposable
         var maxWidthDip = Math.Max(200, work.Width / scale * s.MaxWidthPercent / 100.0);
         var maxHeightDip = Math.Max(80, work.Height / scale * 0.6);
         _card.MaxWidth = maxWidthDip;
+        foreach (var child in ((StackPanel)_card.Child).Children)
+        {
+            if (child is Image img)
+            {
+                img.MaxHeight = Math.Max(120, work.Height / scale * 0.45);
+                img.MaxWidth = Math.Max(160, maxWidthDip - 2 * Math.Round(s.FontSize * 1.05) - 4);
+            }
+        }
 
         var fontSize = s.FontSize;
         Size desired;

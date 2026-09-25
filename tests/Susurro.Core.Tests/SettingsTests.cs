@@ -33,7 +33,8 @@ public sealed class SettingsTests : IDisposable
         s.FriendlyName = "Tinto";
         s.Port = 50000;
         s.Overlay.Position = OverlayPosition.TopRight;
-        s.Overlay.DurationSeconds = 8;
+        Assert.Equal(8, s.Overlay.DurationSeconds); // predeterminado
+        s.Overlay.DurationSeconds = 10;
         s.Overlay.ShowBackground = false;
         s.Overlay.TextOutline = true;
         s.Overlay.TextColor = SubtitleColor.Yellow;
@@ -48,7 +49,7 @@ public sealed class SettingsTests : IDisposable
         Assert.Equal("Tinto", back.FriendlyName);
         Assert.Equal(50000, back.Port);
         Assert.Equal(OverlayPosition.TopRight, back.Overlay.Position);
-        Assert.Equal(8, back.Overlay.DurationSeconds);
+        Assert.Equal(10, back.Overlay.DurationSeconds);
         Assert.False(back.Overlay.ShowBackground);
         Assert.True(back.Overlay.TextOutline);
         Assert.Equal(SubtitleColor.Yellow, back.Overlay.TextColor);
