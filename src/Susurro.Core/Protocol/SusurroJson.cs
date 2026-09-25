@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Susurro.Core.Config;
+using Susurro.Core.Updates;
 
 namespace Susurro.Core.Protocol;
 
@@ -28,10 +29,20 @@ internal partial class SettingsJsonContext : JsonSerializerContext
 {
 }
 
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    AllowTrailingCommas = true)]
+[JsonSerializable(typeof(UpdateManifest))]
+internal partial class UpdateJsonContext : JsonSerializerContext
+{
+}
+
 public static class SusurroJson
 {
     internal static WireJsonContext Wire => WireJsonContext.Default;
     internal static SettingsJsonContext Settings => SettingsJsonContext.Default;
+    internal static UpdateJsonContext Update => UpdateJsonContext.Default;
 
     public static byte[] Serialize(Packet p) => JsonSerializer.SerializeToUtf8Bytes(p, WireJsonContext.Default.Packet);
 

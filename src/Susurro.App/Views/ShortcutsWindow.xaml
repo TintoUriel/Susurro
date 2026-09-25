@@ -1,0 +1,46 @@
+<Window x:Class="Susurro.App.Views.ShortcutsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Susurro — Atajos de teclado"
+        Style="{StaticResource SusurroWindow}"
+        Icon="/Assets/Susurro.ico"
+        Width="460" SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <DockPanel>
+        <!-- Barra de título -->
+        <Grid DockPanel.Dock="Top" Height="40">
+            <TextBlock Text="Atajos de teclado" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Margin="18,0,0,0" />
+            <Button Style="{StaticResource ChromeCloseButton}" Content="&#xE8BB;" HorizontalAlignment="Right" Height="40" Width="44"
+                    WindowChrome.IsHitTestVisibleInChrome="True" Click="Close_Click" ToolTip="Cerrar (Esc)" />
+        </Grid>
+
+        <!-- Pie -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="18,10">
+            <Grid>
+                <Button Style="{StaticResource LinkButton}" Content="Cambiar el atajo global…" FontSize="12" VerticalAlignment="Center"
+                        HorizontalAlignment="Left" Click="ChangeHotkey_Click" />
+                <Button Content="Cerrar" Click="Close_Click" IsCancel="True" IsDefault="True" MinWidth="88" HorizontalAlignment="Right" />
+            </Grid>
+        </Border>
+
+        <StackPanel Margin="18,0,18,16">
+            <TextBlock Text="DESDE CUALQUIER PROGRAMA" Style="{StaticResource SectionHeader}" />
+            <StackPanel x:Name="GlobalRows" />
+
+            <TextBlock Text="AL ESCRIBIR" Style="{StaticResource SectionHeader}" />
+            <StackPanel x:Name="ComposeRows" />
+
+            <TextBlock Text="MENSAJES QUE TE LLEGAN" Style="{StaticResource SectionHeader}" />
+            <StackPanel x:Name="IncomingRows" />
+
+            <TextBlock Text="BANDEJA DEL SISTEMA" Style="{StaticResource SectionHeader}" />
+            <StackPanel x:Name="TrayRows" />
+        </StackPanel>
+    </DockPanel>
+</Window>

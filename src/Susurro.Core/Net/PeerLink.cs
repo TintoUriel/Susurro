@@ -165,6 +165,19 @@ public sealed class PeerLink : IAsyncDisposable
 
     public LinkState State => ComputeState();
 
+    /// <summary>Hay mensajes en espera de entrega o transferencias en curso (no conviene reiniciar ahora).</summary>
+    public bool IsBusy
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_outbox.Count > 0) return true;
+            }
+            return _transfers.HasPending;
+        }
+    }
+
     /// <summary>Contactos: primero los conectados, luego por nombre.</summary>
     public IReadOnlyList<ContactInfo> Contacts
     {

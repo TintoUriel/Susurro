@@ -46,6 +46,9 @@ internal sealed class OverlayController
 
     public void UpdateSettings(OverlaySettings settings) => _settings = settings.Clone();
 
+    /// <summary>No hay nada en pantalla ni esperando para mostrarse.</summary>
+    public bool IsIdle => _host == null && !_hiding && !_gap.IsEnabled && _queue.PendingCount == 0;
+
     public void Enqueue(WhisperMessage message)
     {
         var dropped = _queue.Enqueue(message);

@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/banner.svg" alt="Susurro — Toda la oficina. Un mensaje. Cero distracciones." width="100%">
+<img src="docs/assets/banner.svg" alt="Susurro, para evitar los gritos en la oficina" width="100%">
+
+# Susurro, para evitar los gritos en la oficina
 
 <br>
 
@@ -9,7 +11,8 @@
 ![WPF](https://img.shields.io/badge/UI-WPF-1c1d21?style=flat-square)
 ![LAN P2P](https://img.shields.io/badge/red-LAN%20P2P-1c1d21?style=flat-square)
 ![Cifrado](https://img.shields.io/badge/cifrado-AES--256--GCM-1c1d21?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-94%20OK-6fbf8e?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-123%20OK-6fbf8e?style=flat-square)
+[![CI](https://github.com/TintoUriel/Susurro/actions/workflows/ci.yml/badge.svg)](https://github.com/TintoUriel/Susurro/actions/workflows/ci.yml)
 
 **Mensajes breves, imágenes y archivos entre las PCs de la oficina, como un subtítulo discreto.**<br>
 Sin servidor · sin nube · sin cuentas · sin códigos · sin sonidos · sin robar el foco
@@ -47,7 +50,8 @@ pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés u
 - Ves cuándo alguien **te está escribiendo**
 - Máximo 300 caracteres; el campo se limpia y conserva el foco
 - `Enviado` → `Entregado ✓` → `Visto ✓`
-- Vive en la bandeja del sistema y arranca con Windows
+- <kbd>F1</kbd> (o ⌨ en la ventana) muestra todos los atajos
+- Vive en la bandeja del sistema, arranca con Windows y **se actualiza sola**
 - No guarda historial de mensajes
 
 </td>
@@ -58,14 +62,15 @@ pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés u
 
 | | |
 |---|---|
-| ⌨️ **Atajo global** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde cualquier programa: escribís, <kbd>Enter</kbd>, y volvés a lo que estabas. Configurable. |
+| ⌨️ **Atajo global** | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Espacio</kbd> desde cualquier programa: escribís, <kbd>Enter</kbd>, y volvés a lo que estabas. Configurable. <kbd>F1</kbd> muestra todos los atajos. |
 | 🖼️ **Imágenes con Ctrl+V** | Copiás una captura o una imagen y la pegás en el mensaje: le aparece a la otra persona en el subtítulo, con tu comentario, hasta que la cierra o la **guarda** en Descargas. |
 | 📎 **Archivos** | Pegalos, arrastralos o elegilos con 📎. A la otra persona le aparece una tarjeta **arriba a la izquierda** con **Descargar** o **Cerrar**; viajan recién cuando elige descargar, con progreso, y quedan en su carpeta Descargas. |
 | ✍️ **Está escribiendo…** | Al lado de "1 persona conectada" ves quién te está escribiendo en ese momento. |
 | 🪶 **Liviano de verdad** | 0 % de CPU en reposo (sin sondeo ni bucles), ~9 MB residentes en la bandeja, configuración de pocos KB. |
 | 👥 **Toda la oficina** | Cada persona con Susurro en la red aparece sola en la lista. Le escribís a una o a todos los conectados. |
 | 🙋 **Tu nombre, no el de la PC** | La primera vez te pregunta cómo te llamás; así te ven los demás. Sin códigos ni vinculación. |
-| 🔌 **Directo por la LAN** | Las PCs se hablan entre sí por TCP. Sin servidor central, sin internet, sin base de datos. |
+| 🔌 **Directo por la LAN** | Las PCs se hablan entre sí por TCP. Sin servidor central, sin base de datos: los mensajes nunca pasan por internet. |
+| 🔄 **Se actualiza sola** | Una vez por día busca la última versión en GitHub, la verifica (SHA-256) y la instala sin avisos ni ventanas: se reinicia en un momento en que no estás usando la PC. Si la versión nueva no arranca, vuelve sola a la anterior. |
 | 🔎 **Se encuentran solas** | Descubrimiento automático por UDP; si cambia la IP, se vuelven a encontrar por su identificador. |
 | 🔁 **Reconexión automática** | PC apagada, reiniciada, suspendida o red caída: se reconecta sola y entrega lo que quedó en espera. |
 | 🔐 **Seguro sin contraseñas** | Cada PC tiene una identidad de clave pública (su id es el hash de la clave): nadie puede hacerse pasar por otra. Autenticación mutua y AES-256-GCM. Podés bloquear a quien quieras. |
@@ -157,7 +162,7 @@ Detalles en [Cómo instalar](#5-cómo-instalar) y [Cómo empezar](#6-cómo-empez
 11. [Solución de problemas de conexión](#11-solución-de-problemas-de-conexión)
 12. [Dos instancias en la misma PC (desarrollo)](#12-dos-instancias-en-la-misma-pc-desarrollo)
 
-Anexos: [Uso](#uso) · [Overlay](#el-overlay) · [Configuración](#configuración) · [Rendimiento](#rendimiento)
+Anexos: [Uso](#uso) · [Actualizaciones automáticas](#actualizaciones-automáticas) · [Overlay](#el-overlay) · [Configuración](#configuración) · [Rendimiento](#rendimiento)
 · [Tests](#tests) · [Decisiones técnicas](#decisiones-técnicas) · [Protocolo](docs/PROTOCOL.md) · [Identidad y seguridad](docs/IDENTIDAD.md)
 
 ---
@@ -237,6 +242,17 @@ Todo en un paso (tests + publicación + zip portátil + instalador si está Inno
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
+**Con GitHub Actions** ([.github/workflows/ci.yml](.github/workflows/ci.yml)): cada push y cada pull request
+corre los tests en Windows, publica `Susurro.exe` y arma el instalador. Para sacar una versión:
+
+1. Subí `<Version>` en [Directory.Build.props](Directory.Build.props) (por ejemplo `2.3.0`) y hacé push.
+2. Creá el tag con la misma versión: `git tag v2.3.0 && git push origin v2.3.0`.
+3. El CI crea la *release* con `Susurro.exe`, `SusurroSetup.exe` y `susurro-update.json` (versión,
+   dirección, tamaño y SHA-256 del `.exe`). Desde ese momento, todas las PCs se actualizan solas
+   en menos de un día (ver [Actualizaciones automáticas](#actualizaciones-automáticas)).
+
+Si el tag no coincide con `Directory.Build.props`, el CI falla antes de publicar nada.
+
 > Alternativa mínima: si las PCs ya tienen el *.NET 8 Desktop Runtime*, se puede publicar
 > dependiente del framework (~1 MB):
 > `dotnet publish src/Susurro.App -c Release -r win-x64 --self-contained false -o artifacts/fdd`
@@ -256,6 +272,8 @@ pregunta tu nombre y queda configurado para iniciar con Windows.
 si tenés [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 
 - Instala en *Archivos de programa*, crea el acceso directo del menú Inicio (y opcional el de escritorio).
+- Deja la carpeta del programa con permiso de escritura para los usuarios, así Susurro se
+  [actualiza solo](#actualizaciones-automáticas) sin pedir permisos de administrador.
 - Opciones: *Iniciar con Windows* (marcada), *Permitir en el Firewall* (marcada).
 - Se desinstala desde *Configuración de Windows → Aplicaciones*; quita la regla de firewall, el
   inicio automático y, si lo confirmás, la configuración.
@@ -311,6 +329,8 @@ powershell -ExecutionPolicy Bypass -File scripts/firewall.ps1 -Exe "C:\Program F
   - un *anuncio* al iniciar, al cambiar la red, al volver de suspensión o al cambiar tu nombre;
   - una *consulta* (3 datagramas en 1,5 s) al iniciar, al cambiar la red, con *Buscar de nuevo* o
     cuando hay un mensaje esperando a alguien que no aparece.
+- Lo único que sale de la LAN es la [búsqueda de actualizaciones](#actualizaciones-automáticas): una
+  consulta HTTPS a GitHub por día (se desactiva en *Configuración → General*).
 - Las respuestas incluyen `InstanceId`, nombre y puerto TCP. Esa información **no es confiable**:
   solo aporta direcciones candidatas; la identidad se verifica criptográficamente al conectar.
 - Una PC nueva se agrega a la lista recién después de verificar su identidad por TCP.
@@ -423,7 +443,7 @@ Windows avisa antes de ejecutar un programa. La oferta dura 30 minutos.
 cada 3 s), se borra solo a los 6 s sin teclas nuevas y al llegar el mensaje: no hay tráfico periódico.
 
 **Bandeja del sistema**: clic izquierdo muestra/oculta la ventana; clic derecho abre el menú
-*Mostrar ventana · Ocultar ventana · Configuración · Salir*. El punto del icono es verde si hay
+*Mostrar ventana · Ocultar ventana · Configuración · Atajos de teclado · Salir*. El punto del icono es verde si hay
 alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar la ventana la oculta en la bandeja.
 
 **Línea de comandos**
@@ -436,6 +456,38 @@ alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar
 | `--port N` / `--discovery-port N` | Cambia y guarda los puertos |
 | `--set-autostart on\|off` | Activa/desactiva el inicio con Windows y sale (instalador) |
 | `--uninstall-cleanup` | Quita el inicio con Windows y sale (desinstalador) |
+| `--updated PID` | Lo usa la actualización automática al lanzar la versión nueva |
+
+**Atajos de teclado**: <kbd>F1</kbd> en la ventana principal (o el botón ⌨ de la barra de título, o
+*Atajos de teclado* en el menú de la bandeja) abre una ventana con todos los atajos, incluido el atajo
+global que tengas configurado.
+
+## Actualizaciones automáticas
+
+Susurro se mantiene al día solo, sin que nadie tenga que hacer nada:
+
+1. Un rato después de arrancar (entre 2 y 10 minutos, al azar para que no consulten todas las PCs a
+   la vez) y después **una vez por día**, pide `susurro-update.json` a la última release de GitHub.
+   Es un temporizador de un disparo: no hay sondeo ni CPU en reposo.
+2. Si hay una versión más nueva, descarga `Susurro.exe` junto al actual (`Susurro.exe.download`),
+   solo desde `github.com` por HTTPS, y verifica el **tamaño y el SHA-256** del manifiesto. Si algo
+   no coincide, lo borra y no toca nada.
+3. Cambia los archivos de lugar: el ejecutable en uso pasa a `Susurro.exe.old` (Windows permite
+   renombrar un `.exe` abierto) y el nuevo toma su nombre. La ruta no cambia, así que la regla de
+   firewall y el inicio con Windows siguen valiendo.
+4. Espera un momento **en que no se note**: sin ventanas abiertas, nada en pantalla, ningún mensaje
+   en espera ni archivo transfiriéndose, nadie escribiéndote y al menos 2 minutos sin tocar teclado
+   ni mouse. Ahí lanza la versión nueva (oculta en la bandeja) y se cierra. Tus compañeros la ven
+   desconectada un segundo y los mensajes que te manden en ese momento te llegan igual.
+5. Si la versión nueva no avisa que arrancó en 60 s, la detiene, vuelve a la anterior y no la
+   reintenta hasta el próximo inicio. Si nunca hubo un buen momento, la versión nueva se usa al
+   próximo inicio de Windows.
+
+Requisitos: que la carpeta del programa admita escritura (el instalador 2.2.0 o posterior la deja
+así; `%LOCALAPPDATA%\Programs\Susurro` o cualquier carpeta tuya ya la admite). Las instalaciones
+anteriores a la 2.2.0 hay que actualizarlas **una vez** a mano. No se actualizan solos los perfiles
+de desarrollo (`--profile`) ni las compilaciones Debug. Se desactiva en *Configuración → General →
+Actualizar automáticamente*; el registro (`update`) cuenta cada búsqueda.
 
 ## El overlay
 
@@ -469,7 +521,7 @@ alguien conectado y gris si no; al pasar el mouse dice cuántas personas. Cerrar
 
 | Pestaña | Opciones |
 |---|---|
-| **General** | Tu nombre · Iniciar con Windows · Iniciar minimizado · Icono en la bandeja · **Atajo de teclado** · Confirmar recepción |
+| **General** | Tu nombre · Iniciar con Windows · Iniciar minimizado · Icono en la bandeja · **Atajo de teclado** (y *Ver todos los atajos*) · Confirmar recepción · **Actualizar automáticamente** |
 | **Overlay** | Monitor · Posición (7 opciones) · Distancia al borde · Ancho máximo · Duración · Animaciones · Probar |
 | **Apariencia** | Vista previa en vivo · **Color del texto** (blanco, amarillo, gris claro) · Tamaño · **Contorno de las letras** · Nombre del remitente · **Recuadro de fondo** (on/off) · Opacidad · Estilo de importantes · Alto contraste |
 | **Personas** | Lista con estado e IP · Buscar de nuevo · Bloquear / Desbloquear · Quitar de la lista · Agregar por dirección · IP local · Puerto |
@@ -492,6 +544,7 @@ Publicación Release, en la bandeja del sistema, sin ventanas abiertas:
 | Hilos | 15 |
 | Red en reposo, conectado | un `ping` + `pong` cada 30 s de inactividad por compañero (< 200 bytes) |
 | Red con compañeros apagados | nada: se reconectan cuando la otra PC se anuncia al encenderse |
+| Internet | una consulta HTTPS a GitHub por día (~1 KB); la descarga (~140 MB) solo cuando hay versión nueva |
 | Disco | ~140 MB el programa autocontenido; configuración de pocos KB; log ≤ ~512 KB |
 
 Por qué: sin sondeo ni bucles (lectura asíncrona, temporizadores de un disparo), GC de estación
@@ -504,7 +557,7 @@ al cerrarse, recorte de memoria solo tras eventos (no periódico), icono de band
 dotnet test tests/Susurro.Core.Tests
 ```
 
-94 tests (xUnit):
+123 tests (xUnit), que el [CI](.github/workflows/ci.yml) corre en Windows en cada push:
 
 - **Protocolo y serialización**: ida y vuelta de paquetes, JSON inválido, campos desconocidos,
   tramas (tamaño máximo, truncadas, EOF), AES-GCM (manipulación, repetición, reordenamiento, otra clave).
@@ -524,6 +577,10 @@ dotnet test tests/Susurro.Core.Tests
   versión anterior sin archivos (error claro, el texto sigue andando), límites y persona desconectada,
   nombres peligrosos (`..\`, `CON`, flujos `:`, caracteres bidi), un bloque entra en una trama.
 - **Está escribiendo**: llega a la persona, se apaga y se borra al desconectarse.
+- **Actualización automática**: descarga verificada que reemplaza el ejecutable y guarda el anterior,
+  versión igual o vieja ignorada, hash o tamaño distinto sin tocar nada, solo HTTPS desde GitHub,
+  manifiestos inválidos o enormes, sin internet, vuelta atrás a la versión anterior sin reintentar la
+  nueva, restos de una actualización anterior, búsqueda programada y el manifiesto tal como lo genera el CI.
 
 ## Decisiones técnicas
 
@@ -542,3 +599,5 @@ dotnet test tests/Susurro.Core.Tests
 | Mensajes en espera | 2 min, máx. 20 por persona, en memoria | Un "susurro" viejo no tiene sentido; nada se escribe a disco |
 | Imágenes y archivos | Por la misma sesión cifrada, en bloques de 32 KB; imágenes en memoria (≤ 10 MB), archivos solo si se piden | Sin servidor ni carpetas compartidas; nada viaja ni se guarda sin que la persona lo decida |
 | Compatibilidad | Capacidad `files` anunciada en el saludo (sin subir la versión del protocolo) | La 2.1 sigue hablando con la 2.0.0: texto sí, archivos solo con quien los entiende |
+| Actualizaciones | Manifiesto + `.exe` de la release de GitHub, SHA-256, renombrar el `.exe` en uso y reiniciar sin que se note | Sin servicio de actualización ni permisos de administrador; misma ruta (firewall e inicio con Windows intactos); vuelta atrás si la nueva no arranca |
+| CI | GitHub Actions en Windows; la release sale de un tag `vX.Y.Z` | Tests, `.exe`, instalador y manifiesto siempre salen del mismo lugar |

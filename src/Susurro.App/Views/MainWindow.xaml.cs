@@ -556,6 +556,17 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
+    private void Shortcuts_Click(object sender, RoutedEventArgs e) => _app.ShowShortcuts();
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F1 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            e.Handled = true;
+            _app.ShowShortcuts();
+        }
+    }
+
     private void Minimize_Click(object sender, RoutedEventArgs e)
     {
         if (_app.HasTray) _app.HideMain();

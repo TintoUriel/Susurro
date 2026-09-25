@@ -112,6 +112,12 @@ public sealed class AppSettings
     public string SendHotkey { get; set; } = DefaultHotkey;
     public const string DefaultHotkey = "Ctrl+Shift+Space";
 
+    /// <summary>
+    /// Buscar una vez por día una versión nueva en GitHub e instalarla sola (se reinicia cuando no se
+    /// está usando). Activado por defecto; falta en archivos anteriores a la 2.2.0 → true.
+    /// </summary>
+    public bool AutoUpdate { get; set; } = true;
+
     /// <summary>true cuando el usuario ya pasó por la pantalla inicial.</summary>
     public bool SetupCompleted { get; set; }
 

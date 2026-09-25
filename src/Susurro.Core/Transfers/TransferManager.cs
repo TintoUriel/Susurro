@@ -62,6 +62,22 @@ internal sealed class TransferManager
     /// <summary>Estado del lado de quien envía.</summary>
     public event Action<string, DeliveryState>? Delivery;
 
+    /// <summary>
+    /// Hay algo que se perdería al reiniciar: archivos ofrecidos que siguen vigentes, imágenes
+    /// llegando o descargas en curso. (Una oferta recibida sin tocar no cuenta: se ve en su tarjeta.)
+    /// </summary>
+    public bool HasPending
+    {
+        get
+        {
+            lock (_gate)
+            {
+                PurgeExpiredLocked();
+                return _out.Count > 0 || _in.Values.Any(i => i.IsImage || i.State == TransferState.Downloading);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ enviar
 
     public SendResult SendImage(PeerSession session, Packet offerTemplate, byte[] image)
