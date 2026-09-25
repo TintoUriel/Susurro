@@ -32,9 +32,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
@@ -83,7 +83,7 @@ jobs:
       # Solo main y los tags guardan los binarios (~200 MB por ejecución).
       - name: Guardar binarios
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Susurro-${{ steps.version.outputs.version }}
           path: |
@@ -101,7 +101,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: Susurro-${{ needs.build.outputs.version }}
           path: dist
