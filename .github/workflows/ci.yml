@@ -2,6 +2,8 @@
 #  - Cada push y cada pull request: tests de Core + publicación de Susurro.exe + instalador (Windows).
 #  - Un tag vX.Y.Z (igual a la versión de Directory.Build.props): además crea la release de GitHub con
 #    Susurro.exe, SusurroSetup.exe y susurro-update.json, el manifiesto que usa la actualización automática.
+#  - Sin tag a mano: Actions → CI → Run workflow sobre main con «Publicar la versión» marcada. Crea el
+#    tag v<Version de Directory.Build.props> en ese commit junto con la release.
 name: CI
 
 on:
@@ -10,6 +12,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      publicar:
+        description: Publicar la versión de Directory.Build.props (crea el tag y la release; solo desde main)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -96,7 +103,9 @@ jobs:
   release:
     name: Release de GitHub
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publicar && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -111,7 +120,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          # Con un tag, la release usa ese tag; desde main, gh crea el tag v<versión> en este commit.
+          gh release create "v${{ needs.build.outputs.version }}" \
+            --target "$GITHUB_SHA" \
             dist/release/Susurro.exe \
             dist/installer/SusurroSetup.exe \
             dist/release/susurro-update.json \

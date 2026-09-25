@@ -246,7 +246,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 corre los tests en Windows, publica `Susurro.exe` y arma el instalador. Para sacar una versión:
 
 1. Subí `<Version>` en [Directory.Build.props](Directory.Build.props) (por ejemplo `2.3.0`) y hacé push.
-2. Creá el tag con la misma versión: `git tag v2.3.0 && git push origin v2.3.0`.
+2. Creá el tag con la misma versión: `git tag v2.3.0 && git push origin v2.3.0`. O sin git:
+   *Actions → CI → Run workflow* sobre `main` con **Publicar la versión** marcada (crea el tag solo).
 3. El CI crea la *release* con `Susurro.exe`, `SusurroSetup.exe` y `susurro-update.json` (versión,
    dirección, tamaño y SHA-256 del `.exe`). Desde ese momento, todas las PCs se actualizan solas
    en menos de un día (ver [Actualizaciones automáticas](#actualizaciones-automáticas)).
