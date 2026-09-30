@@ -9,8 +9,10 @@ namespace Susurro.App.Overlay;
 
 /// <summary>
 /// Orquesta el overlay: un mensaje a la vez, cola acotada, temporizadores de un solo disparo
-/// (sin bucles ni sondeo). Los mensajes normales se van solos; los importantes quedan hasta que
-/// se les hace clic (mientras tanto, los que llegan esperan en la cola). Todo ocurre en el hilo de UI.
+/// (sin bucles ni sondeo). Los mensajes normales se van solos (con el mouse encima, esperan); los
+/// importantes y las imágenes quedan hasta que se los cierra o se los contesta (mientras tanto, los que
+/// llegan esperan en la cola). Un clic en un mensaje abre la ventana para contestarle a quien lo mandó.
+/// Todo ocurre en el hilo de UI.
 /// </summary>
 internal sealed class OverlayController
 {
@@ -23,17 +25,25 @@ internal sealed class OverlayController
     private readonly Action<WhisperMessage> _onShown;
     private readonly Action _onIdle;
     private readonly Func<WhisperMessage, string?> _saveImage;
+    private readonly Action<WhisperMessage> _reply;
     private OverlaySettings _settings;
     private OverlayHost? _host;
     private bool _hiding;
+    /// <summary>El actual no se va solo (importante o imagen): su "Visto" se envía al cerrarlo.</summary>
+    private bool _currentPersistent;
+    private DateTime _holdEndsUtc;
+    private TimeSpan? _pausedRemaining;
 
     /// <param name="saveImage">Guarda la imagen del mensaje; devuelve la ruta o null si falló.</param>
-    public OverlayController(OverlaySettings settings, Action<WhisperMessage> onShown, Action onIdle, Func<WhisperMessage, string?> saveImage)
+    /// <param name="reply">Abre la ventana para contestarle a quien mandó el mensaje.</param>
+    public OverlayController(OverlaySettings settings, Action<WhisperMessage> onShown, Action onIdle,
+        Func<WhisperMessage, string?> saveImage, Action<WhisperMessage> reply)
     {
         _settings = settings.Clone();
         _onShown = onShown;
         _onIdle = onIdle;
         _saveImage = saveImage;
+        _reply = reply;
         _hold = new DispatcherTimer(DispatcherPriority.Normal);
         _hold.Tick += (_, _) => EndCurrent();
         _gap = new DispatcherTimer(DispatcherPriority.Normal) { Interval = GapBetweenMessages };
@@ -79,6 +89,7 @@ internal sealed class OverlayController
         _host?.Dispose();
         _host = null;
         _hiding = false;
+        _pausedRemaining = null;
     }
 
     private void TryShowNext()
@@ -92,12 +103,15 @@ internal sealed class OverlayController
         }
 
         var settings = _overrides.Remove(next.Id, out var preview) ? preview : _settings;
-        // Los importantes y las imágenes quedan en pantalla hasta que se les hace clic.
-        var clickToClose = next.Urgent || next.IsImage;
+        // Los importantes y las imágenes quedan en pantalla hasta que se los cierra o se los contesta.
+        _currentPersistent = next.Urgent || next.IsImage;
+        _pausedRemaining = null;
         try
         {
             _host = new OverlayHost(next, settings);
-            if (clickToClose) _host.Dismissed += OnDismissed;
+            _host.Dismissed += OnDismissed;
+            _host.ReplyRequested += OnReplyRequested;
+            _host.HoverChanged += OnHoverChanged;
             if (next.IsImage)
             {
                 var host = _host;
@@ -119,21 +133,54 @@ internal sealed class OverlayController
             return;
         }
 
-        if (clickToClose) return; // "Visto" y cierre, al hacer clic
+        if (_currentPersistent) return; // "Visto" y cierre, al hacer clic
 
         NotifyShown(next);
 
         // Duración configurada + un poco de tiempo de lectura para textos largos (máx. +4 s).
         var extra = Math.Clamp((next.Text.Length - 80) / 40.0, 0, 4);
-        _hold.Interval = TimeSpan.FromSeconds(settings.DurationSeconds + extra);
+        StartHold(TimeSpan.FromSeconds(settings.DurationSeconds + extra));
+    }
+
+    private void StartHold(TimeSpan duration)
+    {
+        _hold.Interval = duration;
+        _holdEndsUtc = DateTime.UtcNow + duration;
         _hold.Start();
+    }
+
+    /// <summary>Con el mouse encima, un mensaje normal no se va: da tiempo a hacerle clic.</summary>
+    private void OnHoverChanged(bool inside)
+    {
+        if (_host == null || _hiding || _currentPersistent) return;
+        if (inside)
+        {
+            if (!_hold.IsEnabled) return;
+            _hold.Stop();
+            _pausedRemaining = _holdEndsUtc - DateTime.UtcNow;
+        }
+        else if (_pausedRemaining is { } remaining)
+        {
+            _pausedRemaining = null;
+            StartHold(remaining > TimeSpan.FromSeconds(1.5) ? remaining : TimeSpan.FromSeconds(1.5));
+        }
     }
 
     private void OnDismissed()
     {
         if (_hiding || _host == null) return;
-        if (_queue.Current is { } current) NotifyShown(current); // para un importante, "Visto" = le hicieron clic
+        // Para un importante o una imagen, "Visto" = lo cerraron (el normal ya lo avisó al mostrarse).
+        if (_currentPersistent && _queue.Current is { } current) NotifyShown(current);
         EndCurrent();
+    }
+
+    private void OnReplyRequested()
+    {
+        if (_hiding || _host == null || _queue.Current is not { } current) return;
+        if (_currentPersistent) NotifyShown(current);
+        EndCurrent();
+        try { _reply(current); }
+        catch (Exception ex) { Log.Error("overlay", "No se pudo abrir la respuesta", ex); }
     }
 
     private void NotifyShown(WhisperMessage message)
@@ -145,6 +192,7 @@ internal sealed class OverlayController
     private void EndCurrent()
     {
         _hold.Stop();
+        _pausedRemaining = null;
         var host = _host;
         if (host == null)
         {

@@ -138,6 +138,7 @@ public partial class SettingsWindow : Window
         MarginSlider.Value = o.EdgeMarginPercent;
         SenderBox.IsChecked = o.ShowSenderName;
         AnimBox.IsChecked = o.Animations;
+        ReplyBox.IsChecked = o.ClickToReply;
         ContrastBox.IsChecked = o.HighContrast;
         UpdateSliderLabels();
 
@@ -313,6 +314,7 @@ public partial class SettingsWindow : Window
         o.EdgeMarginPercent = (int)MarginSlider.Value;
         o.ShowSenderName = SenderBox.IsChecked == true;
         o.Animations = AnimBox.IsChecked == true;
+        o.ClickToReply = ReplyBox.IsChecked == true;
         o.HighContrast = ContrastBox.IsChecked == true;
         o.TextColor = (ColorCombo.SelectedItem as ComboBoxItem)?.Tag is SubtitleColor c ? c : SubtitleColor.White;
         o.TextOutline = OutlineBox.IsChecked == true;

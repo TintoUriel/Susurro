@@ -26,6 +26,17 @@ internal static class SubtitleVisual
         _ => Color.FromRgb(0xF4, 0xF5, 0xF6),
     };
 
+    /// <summary>Se le puede contestar con un clic: hay remitente real y la opción está activada.</summary>
+    public static bool CanReply(WhisperMessage message, OverlaySettings s) =>
+        s.ClickToReply && !message.IsTest && message.SenderId != null;
+
+    /// <summary>
+    /// El overlay recibe clics (si no, los deja pasar a la aplicación de abajo): los importantes y las
+    /// imágenes siempre (se cierran con un clic); los normales, si se les puede contestar.
+    /// </summary>
+    public static bool IsClickable(WhisperMessage message, OverlaySettings s) =>
+        message.Urgent || message.IsImage || CanReply(message, s);
+
     public static Border Build(WhisperMessage message, OverlaySettings s)
     {
         var hc = s.HighContrast || SystemParameters.HighContrast;
@@ -34,9 +45,10 @@ internal static class SubtitleVisual
         var background = s.ShowBackground || hc;
         var alpha = (byte)Math.Round(255 * (hc ? Math.Max(0.95, s.Opacity) : s.Opacity));
 
-        // Los importantes y las imágenes se cierran con un clic: sin recuadro se usa un fondo casi
-        // invisible (alfa 1) para que toda la tarjeta reciba el clic y no solo las letras.
-        var clickable = urgent || message.IsImage;
+        // Si recibe clics y no tiene recuadro, se usa un fondo casi invisible (alfa 1) para que toda la
+        // tarjeta reciba el clic y no solo las letras.
+        var clickable = IsClickable(message, s);
+        var canReply = CanReply(message, s);
         Brush bg = !background ? (clickable ? new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)) : Brushes.Transparent)
             : hc ? new SolidColorBrush(Color.FromArgb(alpha, 0, 0, 0))
             : urgent && s.UrgentStyle == UrgentStyle.Tinted ? new SolidColorBrush(Color.FromArgb(alpha, 38, 27, 16))
@@ -116,6 +128,8 @@ internal static class SubtitleVisual
         if (message.IsImage)
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Tag = "actions" };
+            if (canReply)
+                actions.Children.Add(new Button { Content = "Responder", Tag = "reply", Focusable = false, MinWidth = 90, Margin = new Thickness(0, 0, 8, 0) });
             actions.Children.Add(new Button { Content = "Guardar", Tag = "save", Focusable = false, MinWidth = 90, Margin = new Thickness(0, 0, 8, 0) });
             actions.Children.Add(new Button { Content = "Cerrar", Tag = "close", Focusable = false, MinWidth = 90 });
             panel.Children.Add(actions);
@@ -124,7 +138,7 @@ internal static class SubtitleVisual
         {
             panel.Children.Add(new TextBlock
             {
-                Text = "Clic para cerrar",
+                Text = canReply ? "Clic para responder · clic derecho para cerrar" : "Clic para cerrar",
                 Foreground = new SolidColorBrush(labelColor) { Opacity = 0.85 },
                 FontFamily = Font,
                 HorizontalAlignment = HorizontalAlignment.Center,

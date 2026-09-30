@@ -199,6 +199,15 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Pone a esa persona en «Para» (al contestar un mensaje). Si ya no está en la lista, no cambia nada.</summary>
+    public void SelectRecipient(string id)
+    {
+        if (RecipientCombo.IsDropDownOpen) RecipientCombo.IsDropDownOpen = false;
+        if (_recipientsDirty) RefreshRecipients();
+        if (RecipientCombo.ItemsSource is IEnumerable<RecipientOption> options && options.FirstOrDefault(o => o.Id == id) is { } option)
+            RecipientCombo.SelectedItem = option; // SelectionChanged la recuerda como último destinatario
+    }
+
     private void ShowRecipientMessage(string text, string action)
     {
         RecipientCombo.Visibility = Visibility.Collapsed;

@@ -30,8 +30,17 @@ public partial class ShortcutsWindow : Window
         Add(ComposeRows, "Ocultar la ventana", "Esc");
         Add(ComposeRows, "Ver estos atajos", "F1");
 
-        Add(IncomingRows, "Cerrar un mensaje importante (recién ahí le llega el «Visto»)", "Clic");
-        Add(IncomingRows, "Los demás mensajes se van solos: no hace falta tocar nada", "—");
+        if (_app.Settings.Overlay.ClickToReply)
+        {
+            Add(IncomingRows, "Contestarle a quien lo mandó: se abre la ventana con esa persona en «Para»", "Clic");
+            Add(IncomingRows, "Cerrar sin contestar (un importante queda hasta que lo cierres o lo contestes)", "Clic derecho");
+            Add(IncomingRows, "Los mensajes normales se van solos; con el mouse encima, esperan", "—");
+        }
+        else
+        {
+            Add(IncomingRows, "Cerrar un mensaje importante (recién ahí le llega el «Visto»)", "Clic");
+            Add(IncomingRows, "Los demás mensajes se van solos: no hace falta tocar nada", "—");
+        }
 
         Add(TrayRows, "Mostrar u ocultar Susurro", "Clic");
         Add(TrayRows, "Menú: configuración, atajos y salir", "Clic derecho");

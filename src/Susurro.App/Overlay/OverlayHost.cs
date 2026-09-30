@@ -16,8 +16,9 @@ namespace Susurro.App.Overlay;
 /// Se implementa con un <see cref="HwndSource"/> (no un Window de WPF) para controlar exactamente
 /// los estilos Win32:
 ///  - WS_EX_NOACTIVATE + SW_SHOWNOACTIVATE: nunca roba el foco del teclado.
-///  - WS_EX_TRANSPARENT + ventana en capas: los clics atraviesan el overlay. Excepción: los mensajes
-///    importantes reciben el clic (para cerrarlos), pero siguen sin activarse ni tomar el foco
+///  - WS_EX_TRANSPARENT + ventana en capas: los clics atraviesan el overlay. Excepción: si se le
+///    puede contestar con un clic (opción activada) o es importante o una imagen, recibe el clic
+///    (clic: responder o cerrar; clic derecho: cerrar), pero sigue sin activarse ni tomar el foco
 ///    (WS_EX_NOACTIVATE + MA_NOACTIVATE).
 ///  - WS_EX_TOOLWINDOW sin propietario: no aparece en Alt+Tab ni en la barra de tareas.
 ///  - WS_EX_TOPMOST: por encima de las ventanas normales.
@@ -31,20 +32,21 @@ internal sealed class OverlayHost : IDisposable
     private readonly Border _card;
     private readonly TranslateTransform _shift = new();
     private readonly bool _animate;
-    private readonly bool _clickToClose;
+    private readonly bool _clickable;
     private bool _disposed;
 
     public OverlayHost(WhisperMessage message, OverlaySettings settings)
     {
         var monitor = MonitorService.Resolve(settings.Monitor);
         _animate = settings.Animations && SystemParameters.ClientAreaAnimation;
-        _clickToClose = message.Urgent || message.IsImage;
+        _clickable = SubtitleVisual.IsClickable(message, settings);
+        var canReply = SubtitleVisual.CanReply(message, settings);
 
         var parameters = new HwndSourceParameters("SusurroOverlay")
         {
             WindowStyle = NativeMethods.WS_POPUP,
             ExtendedWindowStyle = NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_TOOLWINDOW |
-                                  NativeMethods.WS_EX_NOACTIVATE | (_clickToClose ? 0 : NativeMethods.WS_EX_TRANSPARENT),
+                                  NativeMethods.WS_EX_NOACTIVATE | (_clickable ? 0 : NativeMethods.WS_EX_TRANSPARENT),
             UsesPerPixelTransparency = true,
             // Crear la ventana (oculta) dentro del monitor destino para heredar su DPI.
             PositionX = monitor.WorkArea.Left + monitor.WorkArea.Width / 2,
@@ -54,16 +56,22 @@ internal sealed class OverlayHost : IDisposable
         };
         _source = new HwndSource(parameters) { SizeToContent = SizeToContent.Manual };
         _source.AddHook(WndProc);
-        EnsureExStyles(_source.Handle, _clickToClose);
+        EnsureExStyles(_source.Handle, _clickable);
 
         _card = SubtitleVisual.Build(message, settings);
         _card.RenderTransform = _shift;
-        var root = new Grid { Background = Brushes.Transparent, IsHitTestVisible = _clickToClose };
-        if (_clickToClose)
+        var root = new Grid { Background = Brushes.Transparent, IsHitTestVisible = _clickable };
+        if (_clickable)
         {
             _card.Cursor = System.Windows.Input.Cursors.Hand;
-            _card.MouseLeftButtonUp += (_, _) => Dismissed?.Invoke();
+            _card.MouseLeftButtonUp += (_, _) =>
+            {
+                if (canReply) ReplyRequested?.Invoke();
+                else Dismissed?.Invoke();
+            };
             _card.MouseRightButtonUp += (_, _) => Dismissed?.Invoke();
+            _card.MouseEnter += (_, _) => HoverChanged?.Invoke(true);
+            _card.MouseLeave += (_, _) => HoverChanged?.Invoke(false);
         }
         foreach (var button in FindButtons(_card))
         {
@@ -74,6 +82,14 @@ internal sealed class OverlayHost : IDisposable
                 {
                     e.Handled = true;
                     SaveRequested?.Invoke();
+                };
+            }
+            else if ((string)button.Tag == "reply")
+            {
+                button.Click += (_, e) =>
+                {
+                    e.Handled = true;
+                    ReplyRequested?.Invoke();
                 };
             }
             else if ((string)button.Tag == "close")
@@ -93,8 +109,14 @@ internal sealed class OverlayHost : IDisposable
 
     public IntPtr Handle => _source.Handle;
 
-    /// <summary>Se hizo clic en un mensaje importante o se cerró una imagen (solo esos reciben clics).</summary>
+    /// <summary>Se cerró sin contestar (clic derecho, botón Cerrar o clic en uno al que no se puede contestar).</summary>
     public event Action? Dismissed;
+
+    /// <summary>Clic para contestarle a quien lo mandó.</summary>
+    public event Action? ReplyRequested;
+
+    /// <summary>El mouse entró (true) o salió (false) del mensaje: mientras está encima, no se va solo.</summary>
+    public event Action<bool>? HoverChanged;
 
     /// <summary>Se pidió guardar la imagen.</summary>
     public event Action? SaveRequested;
@@ -264,7 +286,7 @@ internal sealed class OverlayHost : IDisposable
             case NativeMethods.WM_MOUSEACTIVATE:
                 handled = true;
                 return new IntPtr(NativeMethods.MA_NOACTIVATE);
-            case NativeMethods.WM_NCHITTEST when !_clickToClose:
+            case NativeMethods.WM_NCHITTEST when !_clickable:
                 handled = true;
                 return new IntPtr(NativeMethods.HTTRANSPARENT);
         }

@@ -129,6 +129,11 @@
                         <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
                                    Text="Si Windows tiene desactivadas las animaciones, Susurro lo respeta automáticamente." />
 
+                        <TextBlock Text="CLIC EN UN MENSAJE" Style="{StaticResource SectionHeader}" />
+                        <CheckBox x:Name="ReplyBox" Content="Clic en un mensaje para contestarle" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                                   Text="Se abre la ventana con esa persona en «Para»; clic derecho lo cierra. Desactivado, los clics atraviesan los mensajes normales (los importantes y las imágenes se siguen cerrando con un clic)." />
+
                         <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                             <Button Content="Probar" Click="TestNormal_Click" MinWidth="88" ToolTip="Muestra un mensaje de prueba con esta configuración (sin guardar)" />
                             <Button Content="Probar importante" Click="TestUrgent_Click" Margin="8,0,0,0" />

@@ -140,7 +140,7 @@ internal sealed class AppController : IDisposable
                         $"id {Settings.InstanceId[..8]}…, IP {NetworkInfo.DescribeLocalAddresses()}, puerto {Settings.Port}, " +
                         $"{Settings.Contacts.Count} contacto(s)");
 
-        _overlay = new OverlayController(Settings.Overlay, m => Link.ReportShown(m), RequestTrim, SaveImage);
+        _overlay = new OverlayController(Settings.Overlay, m => Link.ReportShown(m), RequestTrim, SaveImage, ReplyTo);
         _files = new FilesPanel(() => Settings.Overlay);
         _files.DownloadRequested += DownloadFile;
         _files.CloseRequested += id =>
@@ -587,6 +587,22 @@ internal sealed class AppController : IDisposable
         var ownHandle = new System.Windows.Interop.WindowInteropHelper(_main).Handle;
         _quickReturnTo = fg != ownHandle ? fg : IntPtr.Zero;
         _quickMode = _quickReturnTo != IntPtr.Zero;
+        ShowMain();
+    }
+
+    /// <summary>
+    /// Clic en un mensaje recibido: se abre la ventana con esa persona en «Para». Igual que con el atajo,
+    /// al enviar se vuelve a la ventana en la que se estaba (el overlay no se activa: sigue siendo la de
+    /// adelante).
+    /// </summary>
+    private void ReplyTo(WhisperMessage message)
+    {
+        if (_exiting || !IsReady || message.SenderId == null) return;
+        var fg = Native.NativeMethods.GetForegroundWindow();
+        var ownHandle = new System.Windows.Interop.WindowInteropHelper(_main).Handle;
+        _quickReturnTo = fg != ownHandle ? fg : IntPtr.Zero;
+        _quickMode = _quickReturnTo != IntPtr.Zero;
+        _main.SelectRecipient(message.SenderId);
         ShowMain();
     }
 

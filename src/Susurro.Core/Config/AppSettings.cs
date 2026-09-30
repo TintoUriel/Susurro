@@ -55,6 +55,11 @@ public sealed class OverlaySettings
     /// <summary>Contorno/sombra oscura alrededor de las letras (recomendado sin recuadro).</summary>
     public bool TextOutline { get; set; }
     public SubtitleColor TextColor { get; set; } = SubtitleColor.White;
+    /// <summary>
+    /// Clic en un mensaje recibido → se abre la ventana para contestarle a esa persona (clic derecho: cerrar).
+    /// Desactivado, los clics atraviesan los mensajes normales, como antes.
+    /// </summary>
+    public bool ClickToReply { get; set; } = true;
 
     public OverlaySettings Clone() => (OverlaySettings)MemberwiseClone();
 }

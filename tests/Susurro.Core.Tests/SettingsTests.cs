@@ -23,6 +23,7 @@ public sealed class SettingsTests : IDisposable
         Assert.Equal(AppSettings.DefaultPort, s.Port);
         Assert.Empty(s.Contacts);
         Assert.True(s.StartWithWindows); // inicio con Windows activado por defecto
+        Assert.True(s.Overlay.ClickToReply); // clic en un mensaje para contestar, activado por defecto
     }
 
     [Fact]
@@ -38,6 +39,7 @@ public sealed class SettingsTests : IDisposable
         s.Overlay.ShowBackground = false;
         s.Overlay.TextOutline = true;
         s.Overlay.TextColor = SubtitleColor.Yellow;
+        s.Overlay.ClickToReply = false;
         s.SetupCompleted = true;
         s.LastRecipient = AppSettings.AllRecipients;
         s.Contacts.Add(new ContactSettings { InstanceId = SettingsValidator.NewInstanceId(), Name = "Oficina", LastAddress = "10.0.0.5", LastPort = 47810, Blocked = true });
@@ -53,6 +55,7 @@ public sealed class SettingsTests : IDisposable
         Assert.False(back.Overlay.ShowBackground);
         Assert.True(back.Overlay.TextOutline);
         Assert.Equal(SubtitleColor.Yellow, back.Overlay.TextColor);
+        Assert.False(back.Overlay.ClickToReply);
         Assert.True(back.SetupCompleted);
         Assert.Equal(AppSettings.AllRecipients, back.LastRecipient);
         var c = Assert.Single(back.Contacts);

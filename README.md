@@ -31,8 +31,9 @@ Sin servidor · sin nube · sin cuentas · sin códigos · sin sonidos · sin ro
 
 Elegís a quién (o a todos los conectados), escribís y, en su PC, el mensaje aparece unos segundos
 **por encima de todo**, como un subtítulo. Quien lo recibe puede seguir escribiendo en Word, en el navegador o en Visual Studio:
-Susurro **no toma el foco, no captura el mouse ni el teclado, no aparece en Alt+Tab** y los clics lo atraviesan. Los mensajes **importantes** son la excepción: quedan en
-pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés usando).
+Susurro **no toma el foco, no captura el teclado y no aparece en Alt+Tab**. Si querés contestar,
+**hacé clic en el mensaje**: se abre la ventana con esa persona ya elegida en *Para*. Los mensajes
+**importantes** quedan en pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés usando).
 
 <table>
   <tr>
@@ -75,6 +76,7 @@ pantalla hasta que les hacés clic (igual sin quitarle el foco a lo que estés u
 | 🔁 **Reconexión automática** | PC apagada, reiniciada, suspendida o red caída: se reconecta sola y entrega lo que quedó en espera. |
 | 🔐 **Seguro sin contraseñas** | Cada PC tiene una identidad de clave pública (su id es el hash de la clave): nadie puede hacerse pasar por otra. Autenticación mutua y AES-256-GCM. Podés bloquear a quien quieras. |
 | 🎬 **Overlay tipo subtítulo** | Posición, monitor, duración, tamaño, color (blanco / amarillo / gris), recuadro opcional y contorno de letras. |
+| 💬 **Clic para contestar** | Clic en un mensaje recibido y se abre la ventana para responderle a esa persona; clic derecho lo cierra. Con el mouse encima, el mensaje espera. |
 | 📌 **Importantes** | Quedan en pantalla hasta que les hacés clic, sin robar el foco; el *Visto* le llega a quien lo mandó recién en ese momento. Sin sonidos ni ventanas emergentes. |
 | 🖥️ **Multimonitor y DPI** | Monitor automático, principal o específico; nítido al 100, 125, 150 y 200 %; el texto nunca se corta. |
 | ♿ **Accesible** | Tamaño de fuente, alto contraste, animaciones desactivables; respeta la configuración de Windows. |
@@ -423,6 +425,12 @@ más de uno, **Todos los conectados**. <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</
 sacar las manos del texto. Si la persona está desconectada, el mensaje espera hasta 2 minutos. Al enviar
 a todos, el estado se resume: *Entregado a 3 de 4*, *Visto por todos ✓*.
 
+**Contestar**: hacé clic en un mensaje que te llegó (normal, importante o imagen —ahí, el botón
+**Responder**) y se abre la ventana con quien lo mandó elegido en **Para:**, lista para escribir; al
+enviar, vuelve el foco a lo que estabas haciendo. Clic derecho cierra el mensaje sin contestar, y mientras
+el mouse está encima un mensaje normal no se va. Si preferís que los clics atraviesen los mensajes
+normales, desactivalo en *Configuración → Overlay → Clic en un mensaje para contestarle*.
+
 **Imágenes**: copiá una imagen (una captura con <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, "Copiar imagen"
 en el navegador…) y apretá <kbd>Ctrl</kbd>+<kbd>V</kbd> en el campo de mensaje: aparece adjunta con su
 miniatura y lo que escribas va como comentario. A la otra persona le aparece en el subtítulo con
@@ -495,17 +503,22 @@ Actualizar automáticamente*; el registro (`update`) cuenta cada búsqueda.
 - Ventana Win32 creada con `HwndSource` y estilos `WS_EX_NOACTIVATE | WS_EX_TRANSPARENT |
   WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST`, mostrada con `SW_SHOWNOACTIVATE`:
   - **nunca roba el foco** (seguís escribiendo en Word, el navegador, Visual Studio…);
-  - **los clics lo atraviesan** (salvo en los importantes, ver abajo);
   - **no aparece en Alt+Tab ni en la barra de tareas**;
-  - no captura teclado ni mouse, no minimiza ni toca la aplicación activa.
+  - no captura el teclado, no minimiza ni toca la aplicación activa.
+- **Clic para contestar** (activado por defecto): los mensajes recibidos no llevan `WS_EX_TRANSPARENT`
+  y reciben el clic sin activarse (`MA_NOACTIVATE`). Clic → se cierra y se abre la ventana principal con
+  quien lo mandó en *Para* (con el mismo "modo rápido" del atajo: al enviar, el foco vuelve a la
+  aplicación anterior). Clic derecho → solo se cierra. Con el mouse encima, el tiempo en pantalla se
+  pausa. Desactivado, los clics atraviesan los mensajes normales (el mensaje de prueba siempre los deja pasar).
 - Un mensaje a la vez. Los que llegan mientras hay uno visible esperan en una cola (máx. 20); los
   importantes pasan delante de los normales pendientes, sin interrumpir al actual.
 - Duración configurable (2, 5, **8** —predeterminado— o 10 s) + hasta 4 s extra de lectura para textos largos.
 - **Imágenes**: la imagen (hasta el 45 % del alto de la pantalla) con el comentario debajo y los botones
-  *Guardar* / *Cerrar*. Como los importantes, recibe clics sin activarse y queda hasta que se cierra.
+  *Responder* / *Guardar* / *Cerrar*. Como los importantes, recibe clics sin activarse y queda hasta que se cierra.
   Antes de decodificarla se valida que sea PNG/JPEG y que sus dimensiones sean razonables.
 - **Mensajes importantes** (botón *Importante* o <kbd>Ctrl</kbd>+<kbd>I</kbd> al escribir): no se van
-  solos, quedan en pantalla con la leyenda *Clic para cerrar* hasta que se les hace clic. Esa ventana
+  solos, quedan en pantalla con la leyenda *Clic para responder · clic derecho para cerrar* (o *Clic para
+  cerrar* si está desactivado contestar con un clic) hasta que se les hace clic. Esa ventana
   recibe el clic pero sigue sin activarse (`WS_EX_NOACTIVATE` + `MA_NOACTIVATE`): el foco no se mueve
   de la aplicación en uso. Con *Confirmar recepción*, quien lo mandó ve *Visto ✓* recién al clic.
   Mientras un importante espera, los mensajes que llegan quedan en la cola.
@@ -523,7 +536,7 @@ Actualizar automáticamente*; el registro (`update`) cuenta cada búsqueda.
 | Pestaña | Opciones |
 |---|---|
 | **General** | Tu nombre · Iniciar con Windows · Iniciar minimizado · Icono en la bandeja · **Atajo de teclado** (y *Ver todos los atajos*) · Confirmar recepción · **Actualizar automáticamente** |
-| **Overlay** | Monitor · Posición (7 opciones) · Distancia al borde · Ancho máximo · Duración · Animaciones · Probar |
+| **Overlay** | Monitor · Posición (7 opciones) · Distancia al borde · Ancho máximo · Duración · Animaciones · **Clic en un mensaje para contestarle** · Probar |
 | **Apariencia** | Vista previa en vivo · **Color del texto** (blanco, amarillo, gris claro) · Tamaño · **Contorno de las letras** · Nombre del remitente · **Recuadro de fondo** (on/off) · Opacidad · Estilo de importantes · Alto contraste |
 | **Personas** | Lista con estado e IP · Buscar de nuevo · Bloquear / Desbloquear · Quitar de la lista · Agregar por dirección · IP local · Puerto |
 | **Prueba** | Mostrar mensaje de prueba (solo en esta PC, con la configuración sin guardar) · Ver registro · Carpeta de datos |

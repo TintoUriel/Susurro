@@ -75,9 +75,12 @@ Claves del modelo:
 - **Publicación**: single-file autocontenido, **sin compresión** (duplica la RAM) y **sin trimming** (WPF no lo admite).
 - **El overlay nunca toma el foco**: `HwndSource` con `WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED |
   WS_EX_TOOLWINDOW | WS_EX_TOPMOST` y `SW_SHOWNOACTIVATE`. Medido en píxeles físicos con DPI PerMonitorV2.
-  Única excepción al click-through: los mensajes **importantes** (`Urgent` en el protocolo) no llevan
-  `WS_EX_TRANSPARENT` y se cierran con un clic, pero siguen sin activarse (`MA_NOACTIVATE`). No se van
-  solos, y su `ack shown` ("Visto") se envía al hacer clic.
+  Excepciones al click-through (`SubtitleVisual.IsClickable`): con `Overlay.ClickToReply` (activado por
+  defecto) los mensajes recibidos no llevan `WS_EX_TRANSPARENT`: clic → se cierran y `AppController.ReplyTo`
+  abre la ventana principal con el remitente en «Para» (modo rápido: al enviar vuelve el foco); clic derecho →
+  solo se cierran; con el mouse encima se pausa su tiempo. El mensaje de prueba siempre deja pasar los clics.
+  Los **importantes** (`Urgent` en el protocolo) y las imágenes reciben clics siempre, no se van solos y su
+  `ack shown` ("Visto") se envía al cerrarlos o contestarlos. En todos los casos siguen sin activarse (`MA_NOACTIVATE`).
 - **Imágenes y archivos** (`Core/Transfers/TransferManager`): por la sesión cifrada en bloques de 32 KB;
   trama de sesión ≤ 64 KB. Solo con quien anunció la capacidad `files` en el saludo (compatibilidad con la
   2.0.0 sin subir la versión). Validar offset/tamaño/hash; limpiar siempre el nombre con `FileNames.Sanitize`;
