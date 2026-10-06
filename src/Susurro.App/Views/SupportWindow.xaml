@@ -4,7 +4,7 @@
         Title="Susurro — Soporte remoto"
         Style="{StaticResource SusurroWindow}"
         Icon="/Assets/Susurro.ico"
-        Width="460" SizeToContent="Height"
+        Width="480" SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         PreviewKeyDown="Window_PreviewKeyDown">
@@ -22,14 +22,10 @@
 
         <!-- Pie -->
         <Border DockPanel.Dock="Bottom" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="18,10">
-            <Grid>
-                <Button x:Name="InstallButton" Style="{StaticResource LinkButton}" Content="Instalar Quick Assist…" FontSize="12"
-                        VerticalAlignment="Center" HorizontalAlignment="Left" Visibility="Collapsed" Click="Install_Click" />
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="OpenButton" Content="Abrir Quick Assist" Click="Open_Click" MinWidth="140" Margin="0,0,8,0" />
-                    <Button Content="Cerrar" Click="Close_Click" IsCancel="True" IsDefault="True" MinWidth="88" />
-                </StackPanel>
-            </Grid>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="RetryButton" Content="Reintentar" Click="Retry_Click" MinWidth="120" Margin="0,0,8,0" />
+                <Button Content="Cerrar" Click="Close_Click" IsCancel="True" IsDefault="True" MinWidth="88" />
+            </StackPanel>
         </Border>
 
         <StackPanel Margin="18,4,18,16">
@@ -38,16 +34,18 @@
 
             <TextBlock Text="CÓMO FUNCIONA" Style="{StaticResource SectionHeader}" />
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">
-                Quick Assist es la asistencia remota de Microsoft que ya viene con Windows 11. Susurro solo la abre:
-                la pantalla y el control los maneja Quick Assist, con su propio permiso.
+                RustDesk es una herramienta de control remoto open-source. Susurro solo la deja lista y la abre:
+                la pantalla y el control los maneja RustDesk, con su propio pedido de permiso. No viene instalada:
+                se descarga sola la primera vez, de una versión verificada.
             </TextBlock>
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,2">
-                1. Iniciá sesión con tu cuenta de Microsoft y elegí «Ayudar a alguien».<LineBreak />
-                2. Pasale a la persona el código de 6 dígitos que te muestra.<LineBreak />
-                3. La persona lo escribe y aprieta «Permitir»: recién ahí ves su pantalla.
+                1. La persona a la que vas a ayudar también tiene que tener RustDesk abierto (le aparece con /control
+                   en su PC) y, en Configuración → Seguridad, activar «Acceso directo por IP».<LineBreak />
+                2. Cuando te conectás, a esa persona le aparece un pedido: recién cuando aprieta «Aceptar» ves su pantalla.<LineBreak />
+                3. Mientras dura, RustDesk le muestra que la están controlando y puede cortar cuando quiera.
             </TextBlock>
             <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,8,0,0"
-                       Text="El nombre del equipo no aparece: Susurro no lo conoce (no se transmite, por privacidad)." />
+                       Text="Susurro no ve ni controla nada por su cuenta: eso lo hace RustDesk, siempre con el permiso del otro lado." />
         </StackPanel>
     </DockPanel>
 </Window>

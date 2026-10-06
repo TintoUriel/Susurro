@@ -1,56 +1,66 @@
 using System;
-using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 using Susurro.Core.Logging;
+using Susurro.Core.RemoteSupport;
 
 namespace Susurro.App.Services;
 
 /// <summary>
-/// Soporte remoto apoyado en Quick Assist, la asistencia remota de Microsoft que viene con Windows 11.
-/// Susurro solo la <b>abre</b> (y te muestra con quién vas a hablar): la pantalla y el control los maneja
-/// Quick Assist, con su propio pedido de permiso del lado de la otra persona. Susurro no captura la
-/// pantalla de nadie ni le inyecta teclas o clics —eso queda en manos de una herramienta auditada y con
-/// consentimiento explícito—. No agregar acá captura de pantalla ni inyección de entrada.
+/// Soporte remoto apoyado en RustDesk (open-source). Susurro solo <b>deja listo</b> RustDesk y lo <b>abre</b>
+/// para conectar con la persona elegida —igual que antes abría Quick Assist—: la pantalla y el control los
+/// maneja RustDesk, que pide permiso del lado de la otra persona en cada sesión. Susurro no captura la
+/// pantalla de nadie ni le inyecta teclas o clics. No agregar acá captura ni transmisión de pantalla ajena
+/// ni inyección de entrada por red.
+/// <para>
+/// RustDesk no viene adentro de Susurro ni se reparte por la actualización automática: se descarga <b>a
+/// pedido</b> la primera vez que se usa <c>/control</c>, de una versión fijada y verificada
+/// (ver <see cref="RustDeskProvisioner"/> en Core). Solo lo baja la PC que da el soporte y cuando la persona lo pide.
+/// </para>
 /// </summary>
 internal static class RemoteSupport
 {
-    public enum Result { Launched, NotInstalled }
-
-    /// <summary>Id de Quick Assist en la Microsoft Store (para ofrecer instalarlo si falta).</summary>
-    public const string StoreId = "9P7BP5VNWKX5";
-
-    /// <summary>Abre Quick Assist. No conecta ni controla nada: solo lanza la herramienta de Microsoft.</summary>
-    public static Result LaunchQuickAssist()
+    /// <summary>
+    /// Versión de RustDesk que se fija. Fijar una versión auditada (en vez de «la última») es a propósito: así
+    /// una release nueva de RustDesk —o una comprometida— no llega sola a las PCs de la oficina.
+    /// <para>
+    /// Para habilitar la descarga hay que completar <see cref="RustDeskRelease.Sha256"/> y
+    /// <see cref="RustDeskRelease.Size"/> con los del binario que se auditó (desde una fuente confiable):
+    /// </para>
+    /// <code>
+    /// PowerShell:  (Get-FileHash .\rustdesk-1.5.0-x86_64.exe -Algorithm SHA256).Hash
+    ///              (Get-Item    .\rustdesk-1.5.0-x86_64.exe).Length
+    /// </code>
+    /// Mientras estén vacíos, <c>/control</c> avisa que falta configurarlo y <b>no descarga nada</b> (a prueba de fallas).
+    /// </summary>
+    public static readonly RustDeskRelease PinnedRustDesk = new()
     {
-        // 1) El alias de ejecución: en Windows 11 queda en el PATH.
-        if (TryStart("quickassist.exe")) return Result.Launched;
-        // 2) Ruta directa del alias de la app, por si el PATH no lo resuelve.
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var alias = Path.Combine(local, "Microsoft", "WindowsApps", "quickassist.exe");
-        if (File.Exists(alias) && TryStart(alias)) return Result.Launched;
-        Log.Warn("support", "Quick Assist no está disponible en esta PC");
-        return Result.NotInstalled;
-    }
+        Version = "1.5.0",
+        Url = "https://github.com/rustdesk/rustdesk/releases/download/1.5.0/rustdesk-1.5.0-x86_64.exe",
+        Sha256 = "", // ← completar: 64 dígitos hex del SHA-256 de la versión auditada
+        Size = 0,    // ← completar: tamaño exacto del .exe en bytes
+    };
 
-    /// <summary>Abre la página de Quick Assist en la Microsoft Store (cuando no está instalado).</summary>
-    public static void OpenStore()
-    {
-        try { Process.Start(new ProcessStartInfo($"ms-windows-store://pdp/?productid={StoreId}") { UseShellExecute = true }); }
-        catch (Exception ex) { Log.Warn("support", "No se pudo abrir la Store", ex); }
-    }
-
-    private static bool TryStart(string fileName)
+    /// <summary>
+    /// Abre RustDesk para conectar con <paramref name="address"/> (la IP de la persona en la LAN). Si no hay
+    /// dirección, abre RustDesk a secas para que escribas vos la IP. No controla nada por su cuenta.
+    /// </summary>
+    public static bool LaunchRustDesk(string exePath, string? address)
     {
         try
         {
-            Process.Start(new ProcessStartInfo(fileName) { UseShellExecute = true });
+            var psi = new ProcessStartInfo(exePath) { UseShellExecute = true };
+            if (!string.IsNullOrWhiteSpace(address))
+            {
+                // Acceso directo por IP en la LAN (sin servidor ni nube), como el resto de Susurro.
+                psi.ArgumentList.Add("--connect");
+                psi.ArgumentList.Add(address.Trim());
+            }
+            Process.Start(psi);
             return true;
         }
-        catch (Win32Exception) { return false; } // no encontrado
         catch (Exception ex)
         {
-            Log.Warn("support", "No se pudo abrir Quick Assist", ex);
+            Log.Warn("support", "No se pudo abrir RustDesk", ex);
             return false;
         }
     }

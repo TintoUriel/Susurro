@@ -20,6 +20,7 @@ using Susurro.Core.Identity;
 using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
 using Susurro.Core.Net;
+using Susurro.Core.RemoteSupport;
 using Susurro.Core.Transfers;
 using Susurro.Core.Updates;
 
@@ -61,6 +62,7 @@ internal sealed class AppController : IDisposable
     private LogWindow? _logWindow;
     private ShortcutsWindow? _shortcutsWindow;
     private SupportWindow? _supportWindow;
+    private RustDeskProvisioner? _rustDesk;
     private Updater? _updater;
     private readonly DispatcherTimer _updateRestartTimer;
     private System.Version? _stagedVersion;
@@ -706,8 +708,9 @@ internal sealed class AppController : IDisposable
     }
 
     /// <summary>
-    /// Comando «/control»: abre Quick Assist para dar soporte a <paramref name="recipientId"/> (o a quien
-    /// sea, si es null o «todos») y muestra sus datos al lado. No captura ni controla nada por su cuenta.
+    /// Comando «/control»: abre RustDesk para dar soporte a <paramref name="recipientId"/> (o a quien sea, si
+    /// es null o «todos») y muestra sus datos al lado. Susurro no captura ni controla nada por su cuenta: solo
+    /// deja listo RustDesk y lo abre; el control y el permiso los maneja RustDesk del lado de la otra persona.
     /// </summary>
     public void ShowSupport(string? recipientId)
     {
@@ -731,11 +734,24 @@ internal sealed class AppController : IDisposable
         else
         {
             _supportWindow.SetPerson(name, address);
-            _supportWindow.Launch();
+            _supportWindow.Start();
         }
         if (_supportWindow.WindowState == WindowState.Minimized) _supportWindow.WindowState = WindowState.Normal;
         _supportWindow.Activate();
     }
+
+    /// <summary>Provisioner único de RustDesk: comparte la caché y serializa las descargas entre ventanas.</summary>
+    private RustDeskProvisioner RustDesk => _rustDesk ??= new RustDeskProvisioner(new RustDeskOptions
+    {
+        Release = RemoteSupport.PinnedRustDesk,
+        CacheDirectory = Path.Combine(DataDirectory, "tools"),
+    });
+
+    /// <summary>Deja listo el RustDesk fijado (lo descarga y verifica la primera vez). Lo usa la ventana de /control.</summary>
+    public Task<RustDeskResult> EnsureRustDeskAsync(CancellationToken ct = default) => RustDesk.EnsureAsync(ct);
+
+    /// <summary>Abre RustDesk para conectar con esa IP de la LAN. RustDesk pide permiso del lado de la otra persona.</summary>
+    public bool LaunchRustDesk(string exePath, string? address) => RemoteSupport.LaunchRustDesk(exePath, address);
 
     public void OpenDataFolder()
     {

@@ -11,7 +11,7 @@
 ![WPF](https://img.shields.io/badge/UI-WPF-1c1d21?style=flat-square)
 ![LAN P2P](https://img.shields.io/badge/red-LAN%20P2P-1c1d21?style=flat-square)
 ![Cifrado](https://img.shields.io/badge/cifrado-AES--256--GCM-1c1d21?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-123%20OK-6fbf8e?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-137%20OK-6fbf8e?style=flat-square)
 [![CI](https://github.com/TintoUriel/Susurro/actions/workflows/ci.yml/badge.svg)](https://github.com/TintoUriel/Susurro/actions/workflows/ci.yml)
 
 **Mensajes breves, imágenes y archivos entre las PCs de la oficina, como un subtítulo discreto.**<br>
@@ -448,10 +448,17 @@ limpia (sin rutas ni nombres reservados) y el archivo queda marcado como descarg
 Windows avisa antes de ejecutar un programa. La oferta dura 30 minutos.
 
 **Soporte remoto** (`/control`): escribí `/control` y Enter con una persona elegida en *Para* y Susurro
-abre **Quick Assist**, la asistencia remota que ya viene con Windows 11, mostrándote su nombre y su IP.
-El control de la pantalla lo maneja Quick Assist, con su propio pedido de permiso (la persona escribe un
-código de 6 dígitos y aprieta *Permitir*): **Susurro no captura ni controla nada por su cuenta**. Si no
-tenés Quick Assist, te ofrece instalarlo desde la Microsoft Store.
+abre **RustDesk** (una herramienta de control remoto open-source) para conectarte con su IP en la LAN,
+mostrándote su nombre y su dirección. El control de la pantalla lo maneja RustDesk, con su propio pedido de
+permiso: la otra persona ve el pedido y recién cuando aprieta *Aceptar* ves su pantalla, y mientras dura la
+sesión RustDesk le muestra que la están controlando. **Susurro no captura ni controla nada por su cuenta.**
+
+RustDesk no viene instalado ni se reparte por la actualización automática: se **descarga solo la primera
+vez** que usás `/control` (de una versión fijada, por HTTPS desde GitHub, verificando su SHA-256) y queda en
+`%LOCALAPPDATA%\Susurro\tools\`. La persona a la que vas a ayudar también necesita RustDesk abierto con
+*Acceso directo por IP* activado (Configuración → Seguridad). La versión de RustDesk se fija en
+`RemoteSupport.PinnedRustDesk`: hasta completar su SHA-256 y tamaño, `/control` avisa que falta configurarlo
+y no descarga nada.
 
 **Está escribiendo…**: mientras alguien te escribe (a vos o a todos los conectados), al lado de
 "1 persona conectada" aparece *· Ana está escribiendo…*. El aviso se manda al teclear (como mucho

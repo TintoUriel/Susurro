@@ -61,11 +61,16 @@ Claves del modelo:
   nueva avisa por un evento con nombre y, si no avisa en 60 s, `Updater.Rollback`.
 - Atajos: la ventana `Views/ShortcutsWindow` (F1, botón ⌨, menú de la bandeja) lista todos; si agregás un
   atajo, sumalo ahí y al README.
-- Soporte remoto (`Services/RemoteSupport`, `Views/SupportWindow`): el comando `/control` en el campo de
-  mensaje **solo abre Quick Assist** (la asistencia remota de Microsoft) y muestra el nombre/IP de la
-  persona elegida. Susurro no captura pantallas ni inyecta teclado/mouse: el control y el consentimiento
-  los maneja Quick Assist. **No** agregar a Susurro captura ni transmisión de pantalla ajena ni inyección
-  de entrada por red (sería un control remoto encubierto repartido por la actualización automática).
+- Soporte remoto (`Services/RemoteSupport`, `Views/SupportWindow`, `Core/RemoteSupport/RustDeskProvisioner`):
+  el comando `/control` en el campo de mensaje **solo deja listo y abre RustDesk** (control remoto open-source)
+  para conectar con el nombre/IP de la persona elegida. Susurro no captura pantallas ni inyecta teclado/mouse:
+  el control y el consentimiento los maneja RustDesk, que pide permiso del otro lado en cada sesión. RustDesk
+  **no viene adentro de Susurro ni se reparte por la actualización automática**: `RustDeskProvisioner` lo baja
+  a pedido la primera vez (HTTPS desde github.com/*.githubusercontent.com, verificando tamaño y SHA-256 contra
+  una versión **fijada** en `RemoteSupport.PinnedRustDesk`; nunca deja un ejecutable a medias) y lo cachea en
+  `%LOCALAPPDATA%\Susurro\tools\`. **No** agregar a Susurro captura ni transmisión de pantalla ajena ni
+  inyección de entrada por red, ni acceso desatendido/sin permiso, ni meter RustDesk en el instalador o la
+  actualización silenciosa (sería un control remoto encubierto repartido por la actualización automática).
 
 ## Reglas del proyecto (no romper)
 
