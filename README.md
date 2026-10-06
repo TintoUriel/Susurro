@@ -247,8 +247,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 **Con GitHub Actions** ([.github/workflows/ci.yml](.github/workflows/ci.yml)): cada push y cada pull request
 corre los tests en Windows, publica `Susurro.exe` y arma el instalador. Para sacar una versión:
 
-1. Subí `<Version>` en [Directory.Build.props](Directory.Build.props) (por ejemplo `2.4.0`) y hacé push.
-2. Creá el tag con la misma versión: `git tag v2.4.0 && git push origin v2.4.0`. O sin git:
+1. Subí `<Version>` en [Directory.Build.props](Directory.Build.props) (por ejemplo `2.5.0`) y hacé push.
+2. Creá el tag con la misma versión: `git tag v2.5.0 && git push origin v2.5.0`. O sin git:
    *Actions → CI → Run workflow* sobre `main` con **Publicar la versión** marcada (crea el tag solo).
 3. El CI crea la *release* con `Susurro.exe`, `SusurroSetup.exe` y `susurro-update.json` (versión,
    dirección, tamaño y SHA-256 del `.exe`). Desde ese momento, todas las PCs se actualizan solas
@@ -446,6 +446,12 @@ nombre si ya existe) y después puede **Abrir** o **Mostrar en carpeta**. Vos ve
 *Enviando… 45 %* → *Descargado ✓* (o *Lo cerró sin descargar*). Por seguridad, el nombre recibido se
 limpia (sin rutas ni nombres reservados) y el archivo queda marcado como descargado de otra PC, así
 Windows avisa antes de ejecutar un programa. La oferta dura 30 minutos.
+
+**Soporte remoto** (`/control`): escribí `/control` y Enter con una persona elegida en *Para* y Susurro
+abre **Quick Assist**, la asistencia remota que ya viene con Windows 11, mostrándote su nombre y su IP.
+El control de la pantalla lo maneja Quick Assist, con su propio pedido de permiso (la persona escribe un
+código de 6 dígitos y aprieta *Permitir*): **Susurro no captura ni controla nada por su cuenta**. Si no
+tenés Quick Assist, te ofrece instalarlo desde la Microsoft Store.
 
 **Está escribiendo…**: mientras alguien te escribe (a vos o a todos los conectados), al lado de
 "1 persona conectada" aparece *· Ana está escribiendo…*. El aviso se manda al teclear (como mucho

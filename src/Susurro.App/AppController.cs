@@ -60,6 +60,7 @@ internal sealed class AppController : IDisposable
     private WelcomeWindow? _welcomeWindow;
     private LogWindow? _logWindow;
     private ShortcutsWindow? _shortcutsWindow;
+    private SupportWindow? _supportWindow;
     private Updater? _updater;
     private readonly DispatcherTimer _updateRestartTimer;
     private System.Version? _stagedVersion;
@@ -702,6 +703,38 @@ internal sealed class AppController : IDisposable
         }
         if (_shortcutsWindow.WindowState == WindowState.Minimized) _shortcutsWindow.WindowState = WindowState.Normal;
         _shortcutsWindow.Activate();
+    }
+
+    /// <summary>
+    /// Comando «/control»: abre Quick Assist para dar soporte a <paramref name="recipientId"/> (o a quien
+    /// sea, si es null o «todos») y muestra sus datos al lado. No captura ni controla nada por su cuenta.
+    /// </summary>
+    public void ShowSupport(string? recipientId)
+    {
+        if (_exiting) return;
+        string? name = null, address = null;
+        if (recipientId != null && recipientId != AppSettings.AllRecipients)
+        {
+            var c = Link.Contacts.FirstOrDefault(x => x.Id == recipientId);
+            if (c != null) { name = c.Name; address = c.Address; }
+        }
+        if (_supportWindow == null)
+        {
+            _supportWindow = new SupportWindow(this, name, address);
+            _supportWindow.Closed += (_, _) =>
+            {
+                _supportWindow = null;
+                RequestTrim();
+            };
+            _supportWindow.Show();
+        }
+        else
+        {
+            _supportWindow.SetPerson(name, address);
+            _supportWindow.Launch();
+        }
+        if (_supportWindow.WindowState == WindowState.Minimized) _supportWindow.WindowState = WindowState.Normal;
+        _supportWindow.Activate();
     }
 
     public void OpenDataFolder()

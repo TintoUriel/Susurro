@@ -497,6 +497,7 @@ public partial class MainWindow : Window
 
     private void Send()
     {
+        if (TryRunCommand()) return;
         var hasContent = !string.IsNullOrWhiteSpace(Input.Text) || _attachments.Count > 0;
         if (RecipientCombo.SelectedItem is not RecipientOption to)
         {
@@ -525,6 +526,28 @@ public partial class MainWindow : Window
         else if (result.AnyOnline) ShowFeedback("Enviando…", "MutedBrush", sticky: true);
         FocusInput();
         _app.AfterSend(result.AnyOnline);
+    }
+
+    /// <summary>
+    /// Comandos locales que se escriben en el campo (empiezan con «/») y no se envían como mensaje.
+    /// Hoy solo «/control»: abre Quick Assist para darle soporte a quien tengas en «Para».
+    /// </summary>
+    private bool TryRunCommand()
+    {
+        var text = Input.Text.Trim();
+        if (text.Length == 0 || text[0] != '/') return false;
+        var cmd = text.Split(' ', 2)[0].ToLowerInvariant();
+        switch (cmd)
+        {
+            case "/control":
+                var id = (RecipientCombo.SelectedItem as RecipientOption)?.Id;
+                _app.ShowSupport(id == AppSettings.AllRecipients ? null : id);
+                Input.Clear();
+                FocusInput();
+                return true;
+            default:
+                return false; // cualquier otra cosa que empiece con «/» se envía como texto normal
+        }
     }
 
     private void Send_Click(object sender, RoutedEventArgs e) => Send();

@@ -21,7 +21,7 @@ dotnet test tests/Susurro.Core.Tests --filter "FullyQualifiedName~PeerLinkIntegr
 dotnet publish src/Susurro.App -c Release -p:PublishProfile=win-x64   # → artifacts/publish/win-x64/Susurro.exe
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1            # tests + publish + instalador (Inno Setup)
 powershell -ExecutionPolicy Bypass -File scripts/run-two-instances.ps1 [-Reset]   # dos instancias locales (perfiles A/B)
-git tag v2.3.0 && git push origin v2.3.0     # release: antes subir <Version> en Directory.Build.props (el CI lo exige)
+git tag v2.5.0 && git push origin v2.5.0     # release: antes subir <Version> en Directory.Build.props (el CI lo exige)
                                              # o Actions → CI → Run workflow en main con «publicar» (crea el tag)
 ```
 
@@ -61,6 +61,11 @@ Claves del modelo:
   nueva avisa por un evento con nombre y, si no avisa en 60 s, `Updater.Rollback`.
 - Atajos: la ventana `Views/ShortcutsWindow` (F1, botón ⌨, menú de la bandeja) lista todos; si agregás un
   atajo, sumalo ahí y al README.
+- Soporte remoto (`Services/RemoteSupport`, `Views/SupportWindow`): el comando `/control` en el campo de
+  mensaje **solo abre Quick Assist** (la asistencia remota de Microsoft) y muestra el nombre/IP de la
+  persona elegida. Susurro no captura pantallas ni inyecta teclado/mouse: el control y el consentimiento
+  los maneja Quick Assist. **No** agregar a Susurro captura ni transmisión de pantalla ajena ni inyección
+  de entrada por red (sería un control remoto encubierto repartido por la actualización automática).
 
 ## Reglas del proyecto (no romper)
 

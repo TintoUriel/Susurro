@@ -29,6 +29,7 @@ public partial class ShortcutsWindow : Window
         Add(ComposeRows, "Pegar texto, una imagen o archivos copiados", "Ctrl", "V");
         Add(ComposeRows, "Ocultar la ventana", "Esc");
         Add(ComposeRows, "Ver estos atajos", "F1");
+        Add(ComposeRows, "Dar soporte a quien tengas en «Para»: abre Quick Assist (Microsoft)", "/control");
 
         if (_app.Settings.Overlay.ClickToReply)
         {
