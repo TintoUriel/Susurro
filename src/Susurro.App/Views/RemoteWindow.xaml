@@ -6,7 +6,9 @@
         Icon="/Assets/Susurro.ico"
         Width="1024" Height="640"
         MinWidth="400" MinHeight="300"
+        ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
+        StateChanged="Window_StateChanged"
         PreviewKeyDown="Window_PreviewKeyDown"
         PreviewKeyUp="Window_PreviewKeyUp"
         Closing="Window_Closing">
@@ -22,7 +24,12 @@
                 <TextBlock x:Name="FpsText" Text="" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" WindowChrome.IsHitTestVisibleInChrome="True">
+                <ToggleButton x:Name="ControlToggle" Style="{StaticResource ChipToggle}" Content="Controlar"
+                              ToolTip="Activar mouse y teclado remoto" Margin="0,0,8,0" VerticalAlignment="Center"
+                              Checked="ControlToggle_Changed" Unchecked="ControlToggle_Changed" />
                 <Button x:Name="FitButton" Style="{StaticResource ChromeButton}" Content="&#xE9A6;" ToolTip="Ajustar a ventana" Click="Fit_Click" Height="32" Width="40" />
+                <Button Style="{StaticResource ChromeButton}" Content="&#xE921;" ToolTip="Minimizar" Click="Min_Click" Height="32" Width="40" />
+                <Button x:Name="MaxButton" Style="{StaticResource ChromeButton}" Content="&#xE922;" ToolTip="Maximizar" Click="Max_Click" Height="32" Width="40" />
                 <Button Style="{StaticResource ChromeCloseButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="Desconectar (Esc)" Height="32" Width="44" />
             </StackPanel>
         </Grid>
@@ -38,8 +45,7 @@
         <!-- Pantalla remota -->
         <Border Background="#FF0A0A0A" ClipToBounds="True">
             <Image x:Name="ScreenImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="Fant"
-                   MouseMove="Screen_MouseMove" MouseDown="Screen_MouseDown" MouseUp="Screen_MouseUp" MouseWheel="Screen_MouseWheel"
-                   Cursor="Cross" />
+                   MouseMove="Screen_MouseMove" MouseDown="Screen_MouseDown" MouseUp="Screen_MouseUp" MouseWheel="Screen_MouseWheel" />
         </Border>
     </DockPanel>
 </Window>

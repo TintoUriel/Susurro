@@ -13,6 +13,7 @@ public partial class RemoteWindow : Window
     private RemoteSession? _remote;
     private int _remoteW, _remoteH;
     private int _frameCount;
+    private bool _controlling;
     private readonly DispatcherTimer _fpsTimer;
 
     internal RemoteWindow(RemoteSession remote)
@@ -84,16 +85,23 @@ public partial class RemoteWindow : Window
         return (x, y);
     }
 
+    private void ControlToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        _controlling = ControlToggle.IsChecked == true;
+        ScreenImage.Cursor = _controlling ? Cursors.Cross : Cursors.Arrow;
+        StatusText.Text = _controlling ? "Controlando" : "Conectado — solo mirando";
+    }
+
     private void Screen_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_remote == null || _remote.IsHost) return;
+        if (!_controlling || _remote == null || _remote.IsHost) return;
         if (MapToRemote(e) is var (x, y))
             _remote.SendMouseMove(x, y);
     }
 
     private void Screen_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (_remote == null || _remote.IsHost) return;
+        if (!_controlling || _remote == null || _remote.IsHost) return;
         if (MapToRemote(e) is var (x, y))
         {
             int btn = e.ChangedButton switch
@@ -110,7 +118,7 @@ public partial class RemoteWindow : Window
 
     private void Screen_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (_remote == null || _remote.IsHost) return;
+        if (!_controlling || _remote == null || _remote.IsHost) return;
         if (MapToRemote(e) is var (x, y))
         {
             int btn = e.ChangedButton switch
@@ -127,7 +135,7 @@ public partial class RemoteWindow : Window
 
     private void Screen_MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (_remote == null || _remote.IsHost) return;
+        if (!_controlling || _remote == null || _remote.IsHost) return;
         _remote.SendMouseWheel(e.Delta);
     }
 
@@ -139,7 +147,7 @@ public partial class RemoteWindow : Window
             Close();
             return;
         }
-        if (_remote == null || _remote.IsHost) return;
+        if (!_controlling || _remote == null || _remote.IsHost) return;
         var vk = KeyInterop.VirtualKeyFromKey(e.Key);
         if (vk > 0)
         {
@@ -150,7 +158,7 @@ public partial class RemoteWindow : Window
 
     private void Window_PreviewKeyUp(object sender, KeyEventArgs e)
     {
-        if (_remote == null || _remote.IsHost) return;
+        if (!_controlling || _remote == null || _remote.IsHost) return;
         var vk = KeyInterop.VirtualKeyFromKey(e.Key);
         if (vk > 0)
         {
@@ -163,10 +171,19 @@ public partial class RemoteWindow : Window
     {
         if (_remoteW > 0 && _remoteH > 0)
         {
-            Width = _remoteW + 24;
-            Height = _remoteH + 32 + 28 + 16;
+            WindowState = WindowState.Normal;
+            Width = Math.Min(_remoteW + 24, SystemParameters.WorkArea.Width);
+            Height = Math.Min(_remoteH + 32 + 28 + 16, SystemParameters.WorkArea.Height);
         }
     }
+
+    private void Min_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void Max_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void Window_StateChanged(object? sender, EventArgs e) =>
+        MaxButton.Content = WindowState == WindowState.Maximized ? "" : "";
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
