@@ -4,3 +4,4 @@ artifacts/
 .vs/
 *.user
 TestResults/
+*.md
