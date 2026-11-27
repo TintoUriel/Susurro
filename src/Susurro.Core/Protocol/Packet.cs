@@ -28,6 +28,11 @@ public static class PacketType
     public const string Chunk = "chunk";        // bloque de datos (offset + data)
     public const string FileEnd = "fileEnd";    // fin: hash SHA-256 de todo el contenido
     public const string FileNo = "fileNo";      // rechazado / cancelado / no disponible (reason)
+
+    // --- Control remoto (solo con quien anunció la capacidad "remote") ---
+    public const string Remote = "remote";          // state: request | accept | end
+    public const string RemoteFrame = "rFrame";     // captura de pantalla (JPEG en bloques)
+    public const string RemoteInput = "rInput";     // evento de mouse/teclado
 }
 
 /// <summary>Capacidades que cada lado anuncia en hello/welcome (campo "features").</summary>
@@ -35,6 +40,8 @@ public static class Features
 {
     /// <summary>Sabe recibir imágenes y archivos (tramas de hasta 64 KB).</summary>
     public const string Files = "files";
+    /// <summary>Acepta sesiones de control remoto (ver/mover la pantalla).</summary>
+    public const string Remote = "remote";
 }
 
 public static class TransferKinds
@@ -52,6 +59,23 @@ public static class TypingState
 public static class HelloMode
 {
     public const string Session = "session";
+}
+
+public static class RemoteState
+{
+    public const string Request = "request";
+    public const string Accept = "accept";
+    public const string End = "end";
+}
+
+public static class RemoteInputType
+{
+    public const string MouseMove = "mm";
+    public const string MouseDown = "md";
+    public const string MouseUp = "mu";
+    public const string MouseWheel = "mw";
+    public const string KeyDown = "kd";
+    public const string KeyUp = "ku";
 }
 
 public static class AckState
@@ -125,6 +149,18 @@ public sealed class Packet
     public long? Offset { get; set; }
     public byte[]? Data { get; set; }
     public byte[]? Hash { get; set; }
+
+    // Control remoto
+    public int? W { get; set; }
+    public int? H { get; set; }
+    public string? InputType { get; set; }
+    public int? X { get; set; }
+    public int? Y { get; set; }
+    public int? Btn { get; set; }
+    public int? Vk { get; set; }
+    public bool? Down { get; set; }
+    public int? Delta { get; set; }
+    public long? FrameSeq { get; set; }
 }
 
 /// <summary>Datagrama UDP de descubrimiento.</summary>

@@ -5,6 +5,7 @@
     <RootNamespace>Susurro.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Susurro" />
     <InternalsVisibleTo Include="Susurro.Core.Tests" />
   </ItemGroup>
 </Project>

@@ -20,6 +20,7 @@ using Susurro.Core.Identity;
 using Susurro.Core.Logging;
 using Susurro.Core.Messaging;
 using Susurro.Core.Net;
+using Susurro.Core.Protocol;
 using Susurro.Core.Transfers;
 using Susurro.Core.Updates;
 
@@ -61,6 +62,8 @@ internal sealed class AppController : IDisposable
     private LogWindow? _logWindow;
     private ShortcutsWindow? _shortcutsWindow;
     private SupportWindow? _supportWindow;
+    private RemoteWindow? _remoteWindow;
+    private readonly Dictionary<string, RemoteSession> _remoteSessions = new(StringComparer.Ordinal);
     private Updater? _updater;
     private readonly DispatcherTimer _updateRestartTimer;
     private System.Version? _stagedVersion;
@@ -241,6 +244,7 @@ internal sealed class AppController : IDisposable
         link.TransferFailed += (id, reason) => _ui.BeginInvoke(() => _files.SetFailed(id, reason));
         link.TypingChanged += (id, name, on) => _ui.BeginInvoke(() => SetTyping(id, name, on));
         link.DeliveryChanged += (id, st) => _ui.BeginInvoke(() => DeliveryChanged?.Invoke(id, st));
+        link.RemotePacketReceived += (session, packet) => _ui.BeginInvoke(() => HandleRemotePacket(session, packet));
         link.SetContacts(Settings.Contacts);
         return link;
     }
@@ -735,6 +739,75 @@ internal sealed class AppController : IDisposable
         }
         if (_supportWindow.WindowState == WindowState.Minimized) _supportWindow.WindowState = WindowState.Normal;
         _supportWindow.Activate();
+    }
+
+    /// <summary>
+    /// Comando «/remote»: inicia control remoto con el peer seleccionado.
+    /// El viewer ve la pantalla del host y puede mover el mouse y teclado.
+    /// </summary>
+    public void ShowRemote(string? recipientId)
+    {
+        if (_exiting) return;
+        if (recipientId == null || recipientId == AppSettings.AllRecipients)
+        {
+            var online = Link.Contacts.Where(c => c.Status == ContactStatus.Online && !c.Blocked).ToList();
+            if (online.Count == 1)
+                recipientId = online[0].Id;
+            else
+            {
+                _main.ShowNotice(online.Count == 0
+                    ? "No hay nadie conectado para control remoto."
+                    : "Seleccioná a quién querés controlar antes de usar /remote.");
+                return;
+            }
+        }
+        var peerSession = Link.GetRemoteSession(recipientId);
+        if (peerSession == null)
+        {
+            var contact = Link.Contacts.FirstOrDefault(c => c.Id == recipientId);
+            _main.ShowNotice(contact != null
+                ? $"{contact.Name} no soporta control remoto (necesita la misma versión de Susurro)."
+                : "Esa persona no está conectada.");
+            return;
+        }
+        StartRemoteViewer(peerSession);
+    }
+
+    private void StartRemoteViewer(PeerSession peerSession)
+    {
+        var remote = new RemoteSession(peerSession, isHost: false);
+        _remoteSessions[peerSession.PeerId] = remote;
+        _ = peerSession.SendAsync(new Packet { T = PacketType.Remote, State = RemoteState.Request });
+
+        _remoteWindow?.Close();
+        _remoteWindow = new RemoteWindow(remote);
+        _remoteWindow.Closed += (_, _) =>
+        {
+            _remoteWindow = null;
+            _remoteSessions.Remove(peerSession.PeerId);
+            remote.Dispose();
+            RequestTrim();
+        };
+        _remoteWindow.Show();
+    }
+
+    private void HandleRemotePacket(PeerSession session, Packet packet)
+    {
+        if (packet.T == PacketType.Remote && packet.State == RemoteState.Request)
+        {
+            var remote = new RemoteSession(session, isHost: true);
+            _remoteSessions[session.PeerId] = remote;
+            remote.Ended += () => _ui.BeginInvoke(() =>
+            {
+                _remoteSessions.Remove(session.PeerId);
+                remote.Dispose();
+            });
+            remote.StartHosting();
+            Log.Info("remote", $"{session.PeerName} inició control remoto de esta PC");
+            return;
+        }
+        if (_remoteSessions.TryGetValue(session.PeerId, out var rs))
+            rs.HandlePacket(packet);
     }
 
     public void OpenDataFolder()

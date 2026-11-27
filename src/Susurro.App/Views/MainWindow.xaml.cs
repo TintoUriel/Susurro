@@ -493,6 +493,8 @@ public partial class MainWindow : Window
         if (!sticky) _feedbackTimer.Start();
     }
 
+    public void ShowNotice(string text) => ShowFeedback(text, "WarnBrush", sticky: false);
+
     // ------------------------------------------------------------------ envío
 
     private void Send()
@@ -542,6 +544,12 @@ public partial class MainWindow : Window
             case "/control":
                 var id = (RecipientCombo.SelectedItem as RecipientOption)?.Id;
                 _app.ShowSupport(id == AppSettings.AllRecipients ? null : id);
+                Input.Clear();
+                FocusInput();
+                return true;
+            case "/remote":
+                var rid = (RecipientCombo.SelectedItem as RecipientOption)?.Id;
+                _app.ShowRemote(rid == AppSettings.AllRecipients ? null : rid);
                 Input.Clear();
                 FocusInput();
                 return true;

@@ -34,9 +34,10 @@ internal sealed class PeerSession
 
     public PeerSession(Socket socket, NetworkStream stream, SecureChannel channel, bool isDialer, string dialerId,
         string peerId, string peerName, string peerBoot, IPEndPoint remote, int peerPort, long clockOffsetMs, HeartbeatOptions heartbeat,
-        bool peerSupportsFiles = false)
+        bool peerSupportsFiles = false, bool peerSupportsRemote = false)
     {
         PeerSupportsFiles = peerSupportsFiles;
+        PeerSupportsRemote = peerSupportsRemote;
         _socket = socket;
         _stream = stream;
         _channel = channel;
@@ -60,6 +61,8 @@ internal sealed class PeerSession
     public string PeerId { get; }
     /// <summary>La otra PC anunció que recibe imágenes y archivos (versión 2.1 o posterior).</summary>
     public bool PeerSupportsFiles { get; }
+    /// <summary>La otra PC acepta sesiones de control remoto.</summary>
+    public bool PeerSupportsRemote { get; }
     public string PeerName { get; set; }
     public string PeerBoot { get; }
     public IPEndPoint Remote { get; }

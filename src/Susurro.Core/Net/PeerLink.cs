@@ -61,6 +61,8 @@ public sealed class PeerLinkOptions
     public TimeSpan NetworkChangeDebounce { get; init; } = TimeSpan.FromSeconds(2);
     /// <summary>Anunciar y aceptar imágenes y archivos.</summary>
     public bool EnableFileTransfer { get; init; } = true;
+    /// <summary>Anunciar y aceptar control remoto de pantalla.</summary>
+    public bool EnableRemote { get; init; } = true;
     /// <summary>Dónde se escriben las descargas en curso (se mueven al destino al terminar).</summary>
     public string TransferTempDirectory { get; init; } = Path.Combine(Path.GetTempPath(), "Susurro");
 }
@@ -133,10 +135,22 @@ public sealed class PeerLink : IAsyncDisposable
         _transfers.Delivery += (id, st) => DeliveryChanged?.Invoke(id, st);
     }
 
-    private string[]? LocalFeatures => _opts.EnableFileTransfer ? new[] { Features.Files } : null;
+    private string[]? LocalFeatures
+    {
+        get
+        {
+            var list = new List<string>();
+            if (_opts.EnableFileTransfer) list.Add(Features.Files);
+            if (_opts.EnableRemote) list.Add(Features.Remote);
+            return list.Count > 0 ? list.ToArray() : null;
+        }
+    }
 
     private bool AcceptsFiles(string[]? peerFeatures) =>
         _opts.EnableFileTransfer && peerFeatures != null && peerFeatures.Contains(Features.Files);
+
+    private static bool AcceptsRemote(string[]? peerFeatures) =>
+        peerFeatures != null && peerFeatures.Contains(Features.Remote);
 
     // ------------------------------------------------------------------ eventos / estado
 
@@ -157,6 +171,8 @@ public sealed class PeerLink : IAsyncDisposable
     public event Action<string, string>? TransferFailed;
     /// <summary>Alguien empezó o dejó de escribirte: id, nombre, escribiendo.</summary>
     public event Action<string, string, bool>? TypingChanged;
+    /// <summary>Paquete de control remoto recibido: sesión, paquete.</summary>
+    internal event Action<PeerSession, Packet>? RemotePacketReceived;
 
     public string InstanceId => _identity.Id;
     public string BootId { get; }
@@ -464,6 +480,17 @@ public sealed class PeerLink : IAsyncDisposable
     /// <summary>Cierra la oferta sin descargar o cancela la descarga en curso.</summary>
     public void DeclineFile(string fileId) => _transfers.Decline(fileId);
 
+    /// <summary>Devuelve la sesión activa con un peer si soporta control remoto, o null.</summary>
+    internal PeerSession? GetRemoteSession(string peerId)
+    {
+        lock (_gate)
+        {
+            if (!_peers.TryGetValue(peerId, out var peer)) return null;
+            if (peer.Session is { Ready: true, IsClosed: false, PeerSupportsRemote: true } s) return s;
+            return null;
+        }
+    }
+
     private SendResult? CheckFileRecipient(string recipientId, out PeerSession? session)
     {
         session = null;
@@ -611,6 +638,11 @@ public sealed class PeerLink : IAsyncDisposable
             case PacketType.Profile:
                 var name = SettingsValidator.CleanName(p.Name);
                 if (name.Length > 0) UpdatePeerInfo(session, name);
+                break;
+            case PacketType.Remote:
+            case PacketType.RemoteFrame:
+            case PacketType.RemoteInput:
+                RemotePacketReceived?.Invoke(session, p);
                 break;
         }
     }
@@ -1071,7 +1103,7 @@ public sealed class PeerLink : IAsyncDisposable
         var offset = hello.Ts is long ts ? ts - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
         var session = new PeerSession(socket, stream, channel, isDialer: false, dialerId: peerId, peerId,
             DisplayName(hello.Name, peerId), hello.Boot ?? "", remote, hello.Port ?? 0, offset, _opts.Heartbeat,
-            AcceptsFiles(hello.Features));
+            AcceptsFiles(hello.Features), AcceptsRemote(hello.Features));
 
         switch (TryActivate(session))
         {
@@ -1386,7 +1418,7 @@ public sealed class PeerLink : IAsyncDisposable
             var offset = welcome.Ts is long ts ? ts - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
             var session = new PeerSession(socket, stream, channel, isDialer: true, dialerId: _identity.Id, peerId,
                 DisplayName(welcome.Name, peerId), welcome.Boot ?? "", ep, welcome.Port ?? ep.Port, offset, _opts.Heartbeat,
-                AcceptsFiles(welcome.Features));
+                AcceptsFiles(welcome.Features), AcceptsRemote(welcome.Features));
             handedOff = true;
             switch (TryActivate(session))
             {
